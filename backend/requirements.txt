@@ -1,0 +1,32 @@
+# Web Framework
+fastapi==0.117.1
+uvicorn[standard]==0.37.0
+
+# Database
+sqlalchemy==2.0.43
+alembic==1.16.5
+psycopg2-binary==2.9.10
+
+# Data Processing
+pandas==2.3.2
+openpyxl==3.1.5
+
+# Chart Generation
+plotly==6.3.0
+
+# File Processing
+aiofiles==24.1.0
+python-multipart==0.0.20
+
+# Configuration & Environment
+python-dotenv==1.1.1
+pydantic==2.11.9
+
+# Development & Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+httpx==0.25.2
+
+# Additional Utilities
+typing-extensions==4.15.0
+packaging==25.0
