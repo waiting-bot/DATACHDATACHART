@@ -1,4 +1,4 @@
-import { File as FileType, FileValidationRule, ValidationResult, ValidationError } from '../types'
+import type { FileValidationRule, ValidationResult, ValidationError } from '../types'
 
 /**
  * 验证文件是否符合要求

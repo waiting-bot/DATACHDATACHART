@@ -54,6 +54,27 @@ export interface ChartDataset {
   borderWidth?: number
 }
 
+// 新增图表数据接口 (用于后端返回的Base64图像)
+export interface GeneratedChart {
+  chart_type: string
+  chart_name: string
+  chart_data: string // Base64 encoded image
+  width: number
+  height: number
+  format: string
+  file_size?: number
+}
+
+export interface PreviewChart {
+  chart_type: string
+  chart_name: string
+  preview_data: string // Base64 encoded image
+  width: number
+  height: number
+  format: string
+  description?: string
+}
+
 export interface ChartOptions {
   responsive?: boolean
   maintainAspectRatio?: boolean
@@ -70,15 +91,15 @@ export interface ChartOptions {
 }
 
 export interface ChartConfig {
-  type: ChartType
+  type: SimpleChartType
   data: ChartData
   options?: ChartOptions
 }
 
-export type ChartType = 'bar' | 'line' | 'pie' | 'scatter' | 'area' | 'doughnut' | 'radar'
+export type SimpleChartType = 'bar' | 'line' | 'pie' | 'scatter' | 'area' | 'doughnut' | 'radar'
 
 export interface ChartTypeOption {
-  id: ChartType
+  id: SimpleChartType
   name: string
   description: string
   icon?: string
@@ -87,7 +108,7 @@ export interface ChartTypeOption {
 // 图表生成相关类型
 export interface ChartGenerationRequest {
   access_code: string
-  chart_type: ChartType
+  chart_type: SimpleChartType
   file: File
 }
 
@@ -96,7 +117,7 @@ export interface ChartGenerationResponse {
   chart?: {
     image: string // base64 encoded
     format: 'png' | 'svg'
-    chart_type: ChartType
+    chart_type: SimpleChartType
     size?: {
       width: number
       height: number
@@ -123,7 +144,7 @@ export interface AppState {
   
   // 图表生成状态
   generatedChart: string | null
-  chartType: ChartType
+  chartType: SimpleChartType
   isGenerating: boolean
   generationError: string | null
   
@@ -134,6 +155,27 @@ export interface AppState {
 }
 
 export type AppStep = 'access-code' | 'upload' | 'generate' | 'result'
+
+// 工作流步骤枚举
+export enum WorkflowStep {
+  ACCESS_CODE = 'access_code',
+  FILE_UPLOAD = 'file_upload',
+  CHART_GENERATION = 'chart_generation',
+  CHART_DISPLAY = 'chart_display'
+}
+
+// 图表类型枚举 (扩展)
+export enum ChartType {
+  LINE = 'line',
+  BAR = 'bar',
+  PIE = 'pie',
+  SCATTER = 'scatter',
+  AREA = 'area',
+  HEATMAP = 'heatmap',
+  BOX = 'box',
+  VIOLIN = 'violin',
+  HISTOGRAM = 'histogram'
+}
 
 // API错误类型
 export interface ApiError {
@@ -192,6 +234,40 @@ export interface InputProps extends UIComponentProps {
   error?: string
   label?: string
   required?: boolean
+}
+
+export interface HeaderProps {
+  title?: string
+  onLogoClick?: () => void
+  showStatus?: boolean
+  className?: string
+}
+
+export interface StatusBarProps {
+  remainingUsage: number
+  maxUsage: number
+  isAccessCodeValid: boolean
+  currentStep: WorkflowStep
+}
+
+export interface WorkflowStepperProps {
+  currentStep: WorkflowStep
+  steps: Array<{
+    id: WorkflowStep
+    title: string
+    description: string
+    icon: string
+  }>
+  onStepClick?: (step: WorkflowStep) => void
+}
+
+export interface AccessCodeInputProps {
+  value: string
+  onChange: (value: string) => void
+  onValidate?: (isValid: boolean) => void
+  onValidated?: (data: any) => void
+  loading?: boolean
+  error?: string
 }
 
 // 工具函数类型
