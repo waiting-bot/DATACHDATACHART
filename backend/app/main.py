@@ -21,6 +21,7 @@ from app.services.file_service import file_service
 from app.services.excel_service import excel_parser
 from app.services.chart_service import chart_generator
 from app.schemas import *
+from pathlib import Path
 
 # Configure logging
 logging.basicConfig(
@@ -564,6 +565,144 @@ async def get_chart_suggestions(
     except Exception as e:
         logger.error(f"获取图表建议失败: {e}")
         raise HTTPException(status_code=500, detail=f"获取图表建议失败: {str(e)}")
+
+# Preview Chart Generation APIs
+@app.post("/api/generate-previews", response_model=PreviewGenerationResponse)
+async def generate_previews(
+    request: PreviewGenerationRequest,
+    db: Session = Depends(get_db)
+):
+    """生成预览图表（不消耗访问码）"""
+    try:
+        # 验证文件存在
+        if not Path(request.file_path).exists():
+            raise HTTPException(status_code=404, detail="文件不存在")
+        
+        # 解析Excel文件获取数据
+        parse_result = excel_parser.full_parse(request.file_path, 'bar')
+        
+        if not parse_result.get('success'):
+            raise HTTPException(status_code=400, detail=parse_result.get('message', 'Excel解析失败'))
+        
+        chart_data = parse_result.get('chart_data', {})
+        
+        # 生成预览图表
+        previews = chart_generator.generate_multiple_previews(
+            data=chart_data,
+            chart_types=request.chart_types,
+            width=request.width or 400,
+            height=request.height or 300
+        )
+        
+        # 获取文件信息
+        file_info = file_service.get_file_info(Path(request.file_path))
+        
+        return PreviewGenerationResponse(
+            success=True,
+            message=f"成功生成 {len(previews)} 个预览图表",
+            previews=[PreviewChartInfo(**preview) for preview in previews],
+            file_info=file_info
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"预览图表生成失败: {e}")
+        raise HTTPException(status_code=500, detail=f"预览图表生成失败: {str(e)}")
+
+@app.post("/api/generate-selected-charts", response_model=SelectedChartsGenerationResponse)
+async def generate_selected_charts(
+    request: SelectedChartsGenerationRequest,
+    db: Session = Depends(get_db)
+):
+    """生成用户选中的高质量图表（消耗访问码）"""
+    start_time = datetime.now()
+    
+    try:
+        # 1. 验证访问码
+        access_service = AccessCodeService(db)
+        is_valid, code_record, message = access_service.validate_access_code(request.access_code)
+        
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=message)
+        
+        if not code_record.can_use():
+            raise HTTPException(status_code=400, detail="访问码使用次数已达上限")
+        
+        # 2. 验证文件存在
+        if not Path(request.file_path).exists():
+            raise HTTPException(status_code=404, detail="文件不存在")
+        
+        # 3. 解析Excel文件获取数据
+        parse_result = excel_parser.full_parse(request.file_path, 'bar')
+        
+        if not parse_result.get('success'):
+            raise HTTPException(status_code=400, detail=parse_result.get('message', 'Excel解析失败'))
+        
+        chart_data = parse_result.get('chart_data', {})
+        
+        # 4. 生成选中的图表
+        generated_charts = []
+        
+        for chart_type in request.selected_chart_types:
+            try:
+                # 优化图表尺寸
+                if request.width == 800 and request.height == 600:  # 使用默认值时才优化
+                    optimized_width, optimized_height = chart_generator.optimize_chart_size(chart_data, chart_type)
+                    width, height = optimized_width, optimized_height
+                else:
+                    width, height = request.width, request.height
+                
+                # 生成图表
+                chart_result = chart_generator.generate_chart(
+                    data=chart_data,
+                    chart_type=chart_type,
+                    title=f"{chart_generator.get_chart_name(chart_type)}",
+                    width=width,
+                    height=height,
+                    format=request.format or 'png'
+                )
+                
+                if chart_result.get('success'):
+                    generated_charts.append({
+                        'chart_type': chart_type,
+                        'chart_name': chart_generator.get_chart_name(chart_type),
+                        'chart_data': chart_result.get('image_data', ''),
+                        'width': chart_result.get('width', width),
+                        'height': chart_result.get('height', height),
+                        'format': request.format or 'png',
+                        'file_size': len(chart_result.get('image_data', ''))
+                    })
+                else:
+                    logger.warning(f"图表生成失败 {chart_type}: {chart_result.get('message')}")
+                    
+            except Exception as e:
+                logger.error(f"图表生成异常 {chart_type}: {e}")
+        
+        # 5. 更新访问码使用次数
+        if generated_charts:
+            usage_log = UsageLog(
+                access_code_id=code_record.id,
+                chart_type=", ".join(request.selected_chart_types),
+                success=True,
+                processing_time=int((datetime.now() - start_time).total_seconds() * 1000)
+            )
+            db.add(usage_log)
+            code_record.increment_usage()
+            db.commit()
+        
+        return SelectedChartsGenerationResponse(
+            success=True,
+            message=f"成功生成 {len(generated_charts)} 个图表",
+            charts=[GeneratedChartInfo(**chart) for chart in generated_charts],
+            remaining_usage=code_record.remaining_usage if code_record else None
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"选中图表生成失败: {e}")
+        raise HTTPException(status_code=500, detail=f"选中图表生成失败: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run(

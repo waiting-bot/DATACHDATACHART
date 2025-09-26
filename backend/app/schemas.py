@@ -182,6 +182,57 @@ class ChartTypesResponse(BaseModel):
     """支持的图表类型响应模型"""
     chart_types: List[ChartTypeInfo]
 
+# 预览图相关模型
+class PreviewGenerationRequest(BaseModel):
+    """预览图生成请求模型"""
+    file_path: str = Field(..., description="文件路径")
+    chart_types: List[str] = Field(..., description="要生成预览的图表类型列表")
+    width: Optional[int] = Field(400, description="预览图宽度")
+    height: Optional[int] = Field(300, description="预览图高度")
+
+class PreviewChartInfo(BaseModel):
+    """预览图表信息模型"""
+    chart_type: str
+    chart_name: str
+    preview_data: str  # Base64编码的预览图
+    width: int
+    height: int
+    format: str
+    description: Optional[str] = None
+
+class PreviewGenerationResponse(BaseModel):
+    """预览图生成响应模型"""
+    success: bool
+    message: str
+    previews: List[PreviewChartInfo]
+    file_info: Optional[Dict[str, Any]] = None
+
+class SelectedChartsGenerationRequest(BaseModel):
+    """选中图表生成请求模型"""
+    file_path: str = Field(..., description="文件路径")
+    selected_chart_types: List[str] = Field(..., description="用户选中的图表类型列表")
+    access_code: str = Field(..., description="访问码")
+    width: Optional[int] = Field(800, description="图表宽度")
+    height: Optional[int] = Field(600, description="图表高度")
+    format: Optional[str] = Field("png", description="输出格式")
+
+class GeneratedChartInfo(BaseModel):
+    """生成的图表信息模型"""
+    chart_type: str
+    chart_name: str
+    chart_data: str  # Base64编码的图表
+    width: int
+    height: int
+    format: str
+    file_size: Optional[int] = None
+
+class SelectedChartsGenerationResponse(BaseModel):
+    """选中图表生成响应模型"""
+    success: bool
+    message: str
+    charts: List[GeneratedChartInfo]
+    remaining_usage: Optional[int] = None
+
 # 系统配置相关模型
 class SystemConfigRequest(BaseModel):
     """系统配置请求模型"""

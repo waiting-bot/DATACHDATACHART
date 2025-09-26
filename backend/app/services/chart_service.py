@@ -572,6 +572,104 @@ class ChartGenerator:
             logger.error(f"图表尺寸优化失败: {e}")
             return 800, 600  # 默认尺寸
 
+    def generate_preview_chart(self, data: Dict[str, Any], chart_type: str, width: int = 400, height: int = 300) -> Dict[str, Any]:
+        """
+        生成预览图表（小尺寸，快速生成）
+        
+        Args:
+            data: 数据字典
+            chart_type: 图表类型
+            width: 预览图宽度
+            height: 预览图高度
+            
+        Returns:
+            预览图表信息
+        """
+        try:
+            # 调用通用图表生成方法，使用预览参数
+            return self.generate_chart(
+                data=data,
+                chart_type=chart_type,
+                title=f'{chart_type}预览',
+                width=width,
+                height=height,
+                format='png'
+            )
+                
+        except Exception as e:
+            logger.error(f"预览图表生成失败 {chart_type}: {e}")
+            return {
+                'success': False,
+                'message': f'预览图表生成失败: {str(e)}',
+                'chart_type': chart_type
+            }
+
+    def generate_multiple_previews(self, data: Dict[str, Any], chart_types: List[str], width: int = 400, height: int = 300) -> List[Dict[str, Any]]:
+        """
+        批量生成预览图表
+        
+        Args:
+            data: 数据字典
+            chart_types: 图表类型列表
+            width: 预览图宽度
+            height: 预览图高度
+            
+        Returns:
+            预览图表列表
+        """
+        previews = []
+        
+        for chart_type in chart_types:
+            try:
+                result = self.generate_preview_chart(data, chart_type, width, height)
+                if result.get('success'):
+                    previews.append({
+                        'chart_type': chart_type,
+                        'chart_name': self.get_chart_name(chart_type),
+                        'preview_data': result.get('image_data', ''),
+                        'width': width,
+                        'height': height,
+                        'format': 'png',
+                        'description': self.get_chart_description(chart_type)
+                    })
+                else:
+                    logger.warning(f"预览图表生成失败 {chart_type}: {result.get('message')}")
+                    
+            except Exception as e:
+                logger.error(f"预览图表生成异常 {chart_type}: {e}")
+                
+        return previews
+
+    def get_chart_name(self, chart_type: str) -> str:
+        """获取图表类型的中文名称"""
+        chart_names = {
+            'bar': '柱状图',
+            'line': '折线图', 
+            'pie': '饼图',
+            'scatter': '散点图',
+            'area': '面积图',
+            'heatmap': '热力图',
+            'box': '箱线图',
+            'violin': '小提琴图',
+            'histogram': '直方图'
+        }
+        return chart_names.get(chart_type, chart_type)
+
+    def get_chart_description(self, chart_type: str) -> str:
+        """获取图表类型的描述"""
+        descriptions = {
+            'bar': '比较不同类别的数据',
+            'line': '显示数据随时间变化的趋势',
+            'pie': '显示各部分占总体的比例',
+            'scatter': '显示两个变量之间的关系',
+            'area': '显示数据随时间变化的累积效果',
+            'heatmap': '显示数据的密度和分布',
+            'box': '显示数据的分布和异常值',
+            'violin': '显示数据的分布密度',
+            'histogram': '显示数据的频率分布'
+        }
+        return descriptions.get(chart_type, '数据可视化图表')
+
 
 # 创建全局图表生成器实例
 chart_generator = ChartGenerator()
