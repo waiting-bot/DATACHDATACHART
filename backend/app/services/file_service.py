@@ -220,22 +220,27 @@ class FileService:
             logger.error(f"获取文件信息失败: {e}")
             return {"exists": False, "error": str(e)}
     
-    async def cleanup_old_files(self, hours: int = 24):
+    async def cleanup_old_files(self, hours: int = 6):
         """
         清理旧文件
         
         Args:
-            hours: 清理多少小时前的文件
+            hours: 清理多少小时前的文件（默认6小时）
         """
         try:
             cutoff_time = datetime.now() - timedelta(hours=hours)
             cleaned_count = 0
+            total_size = 0
             
-            # 清理临时文件
+            # 清理临时文件（更积极的清理）
             for file_path in self.temp_dir.rglob("*"):
                 if file_path.is_file():
                     file_time = datetime.fromtimestamp(file_path.stat().st_mtime)
+                    file_size = file_path.stat().st_size
+                    
+                    # 临时文件超过1小时就清理
                     if file_time < cutoff_time:
+                        total_size += file_size
                         await self.delete_file(file_path)
                         cleaned_count += 1
             
@@ -243,14 +248,88 @@ class FileService:
             for file_path in self.processed_dir.rglob("*"):
                 if file_path.is_file():
                     file_time = datetime.fromtimestamp(file_path.stat().st_mtime)
+                    file_size = file_path.stat().st_size
+                    
+                    # 已处理文件超过6小时清理
                     if file_time < cutoff_time:
+                        total_size += file_size
                         await self.delete_file(file_path)
                         cleaned_count += 1
             
-            logger.info(f"清理完成，删除了 {cleaned_count} 个旧文件")
+            # 检查磁盘空间
+            await self._check_disk_space()
+            
+            if cleaned_count > 0:
+                logger.info(f"清理完成，删除了 {cleaned_count} 个旧文件，释放 {total_size/1024/1024:.2f} MB 空间")
+            else:
+                logger.debug("没有需要清理的文件")
             
         except Exception as e:
             logger.error(f"清理文件失败: {e}")
+    
+    async def _check_disk_space(self):
+        """检查磁盘空间并在需要时强制清理"""
+        try:
+            import shutil
+            
+            # 获取上传目录的磁盘使用情况
+            total, used, free = shutil.disk_usage(self.uploads_dir)
+            free_gb = free / (1024**3)
+            usage_percent = (used / total) * 100
+            
+            # 磁盘空间告警阈值
+            warning_threshold = 80  # 80%
+            critical_threshold = 90  # 90%
+            
+            if usage_percent >= critical_threshold:
+                logger.warning(f"磁盘空间严重不足: 使用率 {usage_percent:.1f}%, 剩余 {free_gb:.1f} GB")
+                # 强制清理所有超过1小时的文件
+                await self._emergency_cleanup()
+            elif usage_percent >= warning_threshold:
+                logger.warning(f"磁盘空间不足: 使用率 {usage_percent:.1f}%, 剩余 {free_gb:.1f} GB")
+                # 积极清理超过30分钟的文件
+                await self._aggressive_cleanup()
+            
+        except Exception as e:
+            logger.error(f"检查磁盘空间失败: {e}")
+    
+    async def _emergency_cleanup(self):
+        """紧急清理：删除所有超过1小时的文件"""
+        try:
+            cleaned_count = 0
+            cutoff_time = datetime.now() - timedelta(hours=1)
+            
+            for directory in [self.temp_dir, self.processed_dir]:
+                for file_path in directory.rglob("*"):
+                    if file_path.is_file():
+                        file_time = datetime.fromtimestamp(file_path.stat().st_mtime)
+                        if file_time < cutoff_time:
+                            await self.delete_file(file_path)
+                            cleaned_count += 1
+            
+            logger.warning(f"紧急清理完成，删除了 {cleaned_count} 个文件")
+            
+        except Exception as e:
+            logger.error(f"紧急清理失败: {e}")
+    
+    async def _aggressive_cleanup(self):
+        """积极清理：删除所有超过30分钟的文件"""
+        try:
+            cleaned_count = 0
+            cutoff_time = datetime.now() - timedelta(minutes=30)
+            
+            for directory in [self.temp_dir, self.processed_dir]:
+                for file_path in directory.rglob("*"):
+                    if file_path.is_file():
+                        file_time = datetime.fromtimestamp(file_path.stat().st_mtime)
+                        if file_time < cutoff_time:
+                            await self.delete_file(file_path)
+                            cleaned_count += 1
+            
+            logger.info(f"积极清理完成，删除了 {cleaned_count} 个文件")
+            
+        except Exception as e:
+            logger.error(f"积极清理失败: {e}")
     
     async def start_cleanup_task(self):
         """启动文件清理任务"""
@@ -264,9 +343,10 @@ class FileService:
             while self.is_cleanup_running:
                 try:
                     await self.cleanup_old_files()
-                    await asyncio.sleep(3600)  # 每小时清理一次
+                    await asyncio.sleep(1800)  # 每30分钟清理一次
                 except Exception as e:
                     logger.error(f"文件清理任务异常: {e}")
+                    # 出错时等待5分钟后重试
                     await asyncio.sleep(300)  # 出错后等待5分钟再重试
         
         self.cleanup_task = asyncio.create_task(cleanup_worker())

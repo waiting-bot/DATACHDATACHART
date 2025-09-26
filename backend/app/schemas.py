@@ -254,6 +254,24 @@ class SystemConfigResponse(BaseModel):
         from_attributes = True
 
 # 通用响应模型
+class StandardResponse(BaseModel):
+    """标准API响应模型 - 符合dev-preferences.md规范"""
+    success: bool
+    data: Optional[Any] = None
+    error: Optional[Dict[str, str]] = None
+
+class ErrorDetail(BaseModel):
+    """错误详情模型"""
+    code: str
+    message: str
+
+class StandardErrorResponse(BaseModel):
+    """标准错误响应模型"""
+    success: bool = False
+    data: Optional[Any] = None
+    error: ErrorDetail
+
+# 保持向后兼容的旧响应模型
 class ApiResponse(BaseModel):
     """通用API响应模型"""
     success: bool

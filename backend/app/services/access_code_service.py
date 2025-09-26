@@ -11,7 +11,8 @@ from ..models import AccessCode, UsageLog, SystemConfig
 from ..database import db_manager
 from ..schemas import AccessCodeCreate, AccessCodeUpdate
 
-logger = logging.getLogger(__name__)
+from app.logging_config import get_logger
+logger = get_logger(__name__)
 
 class AccessCodeService:
     """访问码服务"""
@@ -80,17 +81,50 @@ class AccessCodeService:
     
     def use_access_code(self, access_code: str, ip_address: str = None, 
                        user_agent: str = None) -> tuple[bool, str, Optional[AccessCode]]:
-        """使用访问码"""
+        """使用访问码（并发安全版本）"""
         try:
-            # 验证访问码
-            is_valid, code_record, message = self.validate_access_code(access_code)
+            # 使用原子性操作避免并发问题
+            from sqlalchemy import text
             
-            if not is_valid:
-                return False, message, code_record
+            # 先获取访问码记录
+            code_record = self.get_access_code_by_code(access_code)
+            if not code_record:
+                return False, "访问码不存在", None
             
-            # 增加使用次数
-            if not code_record.increment_usage():
-                return False, "增加使用次数失败", code_record
+            # 验证访问码状态
+            if not code_record.is_valid():
+                if code_record.status == "exhausted":
+                    return False, "访问码使用次数已达上限", code_record
+                elif code_record.status == "expired":
+                    return False, "访问码已过期", code_record
+                else:
+                    return False, "访问码无效", code_record
+            
+            # 使用原子性更新操作（SQLite兼容版本）
+            update_query = text("""
+                UPDATE access_codes 
+                SET usage_count = usage_count + 1, 
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id AND usage_count < max_usage
+                RETURNING usage_count
+            """)
+            
+            result = self.db.execute(update_query, {"id": code_record.id})
+            updated_row = result.fetchone()
+            
+            # 检查是否更新成功
+            if not updated_row:
+                return False, "访问码使用次数已达上限", code_record
+            
+            new_usage_count = updated_row[0]
+            
+            # 刷新对象状态
+            self.db.refresh(code_record)
+            
+            # 验证更新结果
+            if new_usage_count > code_record.max_usage:
+                self.db.rollback()
+                return False, "访问码使用次数已达上限", code_record
             
             # 记录使用日志
             usage_log = UsageLog(

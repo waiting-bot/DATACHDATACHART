@@ -86,11 +86,17 @@ class ChartGenerator:
             if chart_type not in self.supported_chart_types:
                 raise ValueError(f"不支持的图表类型: {chart_type}")
             
-            # 生成图表
-            fig = self.supported_chart_types[chart_type](data, title)
+            # 生成图表（不包含标题，标题在主布局中设置）
+            fig = self.supported_chart_types[chart_type](data, "")
             
-            # 应用默认布局
-            fig.update_layout(**self.default_layout)
+            # 应用默认布局（包含尺寸和标题）
+            layout_config = self.default_layout.copy()
+            layout_config.update({
+                'width': width,
+                'height': height,
+                'title': title
+            })
+            fig.update_layout(**layout_config)
             
             # 根据格式输出
             if format.lower() == 'png':
@@ -155,12 +161,9 @@ class ChartGenerator:
             )
         ])
         
-        fig.update_layout(
-            title=title,
-            xaxis_title=label_col,
-            yaxis_title=value_col,
-            hovermode='x unified'
-        )
+        # 设置坐标轴标题但不调用update_layout（避免覆盖主布局设置）
+        fig.update_xaxes(title=label_col)
+        fig.update_yaxes(title=value_col)
         
         return fig
     
@@ -196,12 +199,10 @@ class ChartGenerator:
             )
         ])
         
-        fig.update_layout(
-            title=title,
-            xaxis_title=x_col,
-            yaxis_title=y_col,
-            hovermode='x unified'
-        )
+        # 设置坐标轴标题但不调用update_layout（避免覆盖主布局设置）
+        fig.update_xaxes(title=x_col)
+        fig.update_yaxes(title=y_col)
+        fig.update_layout(hovermode='x unified')
         
         return fig
     
@@ -238,10 +239,8 @@ class ChartGenerator:
             )
         ])
         
-        fig.update_layout(
-            title=title,
-            showlegend=True
-        )
+        # 饼图不需要设置坐标轴标题，但需要保持图例显示
+        # showlegend 已在 default_layout 中设置
         
         return fig
     
@@ -280,11 +279,9 @@ class ChartGenerator:
             )
         ])
         
-        fig.update_layout(
-            title=title,
-            xaxis_title=x_col,
-            yaxis_title=y_col
-        )
+        # 设置坐标轴标题但不调用update_layout（避免覆盖主布局设置）
+        fig.update_xaxes(title=x_col)
+        fig.update_yaxes(title=y_col)
         
         return fig
     
@@ -319,11 +316,9 @@ class ChartGenerator:
             )
         ])
         
-        fig.update_layout(
-            title=title,
-            xaxis_title=x_col,
-            yaxis_title=y_col
-        )
+        # 设置坐标轴标题但不调用update_layout（避免覆盖主布局设置）
+        fig.update_xaxes(title=x_col)
+        fig.update_yaxes(title=y_col)
         
         return fig
     
@@ -366,7 +361,7 @@ class ChartGenerator:
             hoverongaps=False
         ))
         
-        fig.update_layout(title=title)
+        # 标题已在主布局中设置
         return fig
     
     def _generate_box_chart(self, data: Dict[str, Any], title: str) -> go.Figure:
@@ -392,7 +387,8 @@ class ChartGenerator:
         for col_name, values in numeric_columns:
             fig.add_trace(go.Box(y=values, name=col_name))
         
-        fig.update_layout(title=title, yaxis_title='数值')
+        # 设置Y轴标题
+        fig.update_yaxes(title='数值')
         return fig
     
     def _generate_violin_chart(self, data: Dict[str, Any], title: str) -> go.Figure:
@@ -418,7 +414,8 @@ class ChartGenerator:
         for col_name, values in numeric_columns:
             fig.add_trace(go.Violin(y=values, name=col_name))
         
-        fig.update_layout(title=title, yaxis_title='数值')
+        # 设置Y轴标题
+        fig.update_yaxes(title='数值')
         return fig
     
     def _generate_histogram_chart(self, data: Dict[str, Any], title: str) -> go.Figure:
@@ -441,17 +438,16 @@ class ChartGenerator:
         
         # 创建直方图
         fig = go.Figure(data=[go.Histogram(x=all_values, nbinsx=20)])
-        fig.update_layout(title=title, xaxis_title='数值', yaxis_title='频次')
+        # 设置坐标轴标题
+        fig.update_xaxes(title='数值')
+        fig.update_yaxes(title='频次')
         return fig
     
     def _convert_to_png(self, fig: go.Figure, width: int, height: int) -> str:
         """转换为 PNG 格式 (Base64)"""
         try:
-            # 配置图像大小
-            fig.update_layout(width=width, height=height)
-            
-            # 转换为 PNG
-            img_bytes = fig.to_image(format="png")
+            # 转换为 PNG，直接指定尺寸
+            img_bytes = fig.to_image(format="png", width=width, height=height)
             img_base64 = base64.b64encode(img_bytes).decode('utf-8')
             
             return f"data:image/png;base64,{img_base64}"
@@ -463,11 +459,8 @@ class ChartGenerator:
     def _convert_to_svg(self, fig: go.Figure, width: int, height: int) -> str:
         """转换为 SVG 格式"""
         try:
-            # 配置图像大小
-            fig.update_layout(width=width, height=height)
-            
-            # 转换为 SVG
-            img_bytes = fig.to_image(format="svg")
+            # 转换为 SVG，直接指定尺寸
+            img_bytes = fig.to_image(format="svg", width=width, height=height)
             img_str = img_bytes.decode('utf-8')
             
             return f"data:image/svg+xml;base64,{base64.b64encode(img_str.encode('utf-8')).decode('utf-8')}"

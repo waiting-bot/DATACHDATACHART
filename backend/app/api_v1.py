@@ -1,0 +1,390 @@
+"""
+API v1 路由模块
+符合dev-preferences.md规范的API路由
+"""
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
+from sqlalchemy.orm import Session
+from typing import Optional, List
+import logging
+
+from app.database import get_db
+from app.services.access_code_service import AccessCodeService, UsageLogService, SystemConfigService
+from app.services.file_service import file_service
+from app.services.excel_service import excel_parser
+from app.services.chart_service import chart_generator
+from app.schemas import *
+from app.exceptions import create_success_response, ErrorCode, ErrorMessage
+from pathlib import Path
+
+from app.logging_config import get_logger, log_performance
+logger = get_logger(__name__)
+
+# 创建路由器
+router = APIRouter(prefix="/api/v1", tags=["v1"])
+
+# === 健康检查和信息API ===
+
+@router.get("/health")
+async def health_check():
+    """健康检查端点"""
+    from app.database import check_database_connection
+    db_status = check_database_connection()
+    return create_success_response({
+        "status": "healthy" if db_status else "unhealthy",
+        "database": "connected" if db_status else "disconnected",
+        "version": "1.0.0"
+    })
+
+@router.get("/info")
+async def api_info():
+    """API信息端点"""
+    return create_success_response({
+        "name": "智能图表生成工具 API",
+        "version": "1.0.0",
+        "description": "基于Excel文件自动生成图表的API服务",
+        "endpoints": {
+            "health": "/api/v1/health",
+            "validate_access_code": "/api/v1/access-codes/validate",
+            "generate_chart": "/api/v1/charts/generate",
+            "chart_types": "/api/v1/charts/types"
+        },
+        "supported_file_formats": [".xlsx", ".xls"],
+        "supported_chart_types": ["bar", "line", "pie", "scatter", "area", "heatmap", "box", "violin", "histogram"]
+    })
+
+# === 访问码管理API ===
+
+@router.post("/access-codes", response_model=StandardResponse)
+async def create_access_code(
+    access_code_data: AccessCodeCreate,
+    db: Session = Depends(get_db)
+):
+    """创建访问码"""
+    try:
+        service = AccessCodeService(db)
+        access_code = service.create_access_code(access_code_data)
+        return create_success_response(access_code)
+    except Exception as e:
+        logger.error(f"创建访问码失败: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/access-codes/validate", response_model=StandardResponse)
+async def validate_access_code(
+    request: AccessCodeValidateRequest,
+    db: Session = Depends(get_db)
+):
+    """验证访问码"""
+    try:
+        service = AccessCodeService(db)
+        is_valid, code_record, message = service.validate_access_code(request.access_code)
+        
+        if is_valid and code_record:
+            response_data = AccessCodeValidateResponse(
+                is_valid=True,
+                message=message,
+                access_code=code_record,
+                remaining_usage=code_record.remaining_usage
+            )
+            return create_success_response(response_data)
+        else:
+            raise HTTPException(status_code=400, detail=message)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"验证访问码失败: {e}")
+        raise HTTPException(status_code=500, detail="验证失败")
+
+@router.get("/access-codes/{access_code_id}", response_model=StandardResponse)
+async def get_access_code(
+    access_code_id: int,
+    db: Session = Depends(get_db)
+):
+    """获取访问码详情"""
+    try:
+        service = AccessCodeService(db)
+        access_code = service.get_access_code_by_id(access_code_id)
+        if not access_code:
+            raise HTTPException(status_code=404, detail="访问码不存在")
+        return create_success_response(access_code)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取访问码失败: {e}")
+        raise HTTPException(status_code=500, detail="获取访问码失败")
+
+@router.get("/access-codes", response_model=StandardResponse)
+async def get_access_codes(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db)
+):
+    """获取访问码列表"""
+    try:
+        service = AccessCodeService(db)
+        access_codes = service.get_all_access_codes(skip=skip, limit=limit)
+        return create_success_response(access_codes)
+    except Exception as e:
+        logger.error(f"获取访问码列表失败: {e}")
+        raise HTTPException(status_code=500, detail="获取访问码列表失败")
+
+@router.get("/access-codes/statistics", response_model=StandardResponse)
+async def get_access_code_statistics(
+    db: Session = Depends(get_db)
+):
+    """获取访问码统计信息"""
+    try:
+        service = AccessCodeService(db)
+        stats = service.get_access_code_statistics()
+        return create_success_response(stats)
+    except Exception as e:
+        logger.error(f"获取统计信息失败: {e}")
+        raise HTTPException(status_code=500, detail="获取统计信息失败")
+
+# === 图表类型API ===
+
+@router.get("/charts/types", response_model=StandardResponse)
+async def get_chart_types():
+    """获取支持的图表类型"""
+    chart_types = [
+        ChartTypeInfo(
+            type=ChartType.LINE,
+            name="折线图",
+            description="显示数据随时间变化的趋势",
+            suitable_for=["时间序列数据", "趋势分析", "连续数据"]
+        ),
+        ChartTypeInfo(
+            type=ChartType.BAR,
+            name="柱状图",
+            description="比较不同类别的数据",
+            suitable_for=["分类数据", "数量比较", "离散数据"]
+        ),
+        ChartTypeInfo(
+            type=ChartType.PIE,
+            name="饼图",
+            description="显示各部分占总体的比例",
+            suitable_for=["比例分析", "占比显示", "部分与整体"]
+        ),
+        ChartTypeInfo(
+            type=ChartType.SCATTER,
+            name="散点图",
+            description="显示两个变量之间的关系",
+            suitable_for=["相关性分析", "数据分布", "双变量关系"]
+        ),
+        ChartTypeInfo(
+            type=ChartType.AREA,
+            name="面积图",
+            description="显示数据随时间变化的累积效果",
+            suitable_for=["累积数据", "时间序列", "总量分析"]
+        ),
+        ChartTypeInfo(
+            type=ChartType.HEATMAP,
+            name="热力图",
+            description="显示数据的密度和分布",
+            suitable_for=["矩阵数据", "密度分析", "相关性热力图"]
+        ),
+        ChartTypeInfo(
+            type=ChartType.BOX,
+            name="箱线图",
+            description="显示数据的分布和异常值",
+            suitable_for=["数据分布", "异常值检测", "统计分析"]
+        ),
+        ChartTypeInfo(
+            type=ChartType.VIOLIN,
+            name="小提琴图",
+            description="显示数据的分布密度",
+            suitable_for=["数据分布", "密度分析", "统计可视化"]
+        ),
+        ChartTypeInfo(
+            type=ChartType.HISTOGRAM,
+            name="直方图",
+            description="显示数据的频率分布",
+            suitable_for=["频率分布", "数据分布", "统计分析"]
+        )
+    ]
+    
+    return create_success_response(ChartTypesResponse(chart_types=chart_types))
+
+# === 文件上传API ===
+
+@router.post("/files/upload", response_model=StandardResponse)
+@log_performance
+async def upload_file(
+    file: UploadFile = File(...),
+    access_code: str = Form(...),
+    chart_type: Optional[ChartType] = Form(None),
+    db: Session = Depends(get_db)
+):
+    """上传Excel文件"""
+    try:
+        # 保存文件
+        file_info = await file_service.save_uploaded_file(file, access_code, db)
+        
+        response_data = FileUploadResponse(
+            success=True,
+            message="文件上传成功",
+            file_info=file_info,
+            remaining_usage=file_info.get("remaining_usage"),
+            validation_details=file_info.get("validation_details")
+        )
+        
+        return create_success_response(response_data)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"文件上传失败: {e}")
+        raise HTTPException(status_code=500, detail=f"文件上传失败: {str(e)}")
+
+# === 图表生成API ===
+
+@router.post("/charts/generate", response_model=StandardResponse)
+@log_performance
+async def generate_chart(
+    request: ChartGenerationRequest,
+    db: Session = Depends(get_db)
+):
+    """生成图表（支持文件上传或直接数据）"""
+    try:
+        service = AccessCodeService(db)
+        
+        # 验证访问码
+        is_valid, code_record, message = service.validate_access_code(request.access_code)
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=message)
+        
+        # 处理文件上传或直接数据生成
+        if request.chart_data:
+            # 直接从数据生成图表
+            chart_result = chart_generator.generate_chart(
+                data=request.chart_data,
+                chart_type=request.chart_type.value if request.chart_type else 'bar',
+                title=request.chart_title or "数据图表",
+                width=request.width or 800,
+                height=request.height or 600,
+                format=request.format or 'png'
+            )
+        else:
+            # 需要文件路径，这里简化处理
+            raise HTTPException(status_code=400, detail="请提供图表数据或文件路径")
+        
+        # 使用访问码
+        success, use_message, _ = service.use_access_code(request.access_code)
+        if not success:
+            raise HTTPException(status_code=400, detail=use_message)
+        
+        response_data = ChartGenerationResponse(
+            success=True,
+            message="图表生成成功",
+            chart_data=chart_result,
+            chart_type=request.chart_type,
+            remaining_usage=code_record.remaining_usage - 1 if code_record else None
+        )
+        
+        return create_success_response(response_data)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"图表生成失败: {e}")
+        raise HTTPException(status_code=500, detail=f"图表生成失败: {str(e)}")
+
+# === 预览图生成API ===
+
+@router.post("/charts/previews/generate", response_model=StandardResponse)
+async def generate_previews(
+    request: PreviewGenerationRequest,
+    db: Session = Depends(get_db)
+):
+    """生成预览图（不消耗访问码）"""
+    try:
+        if not Path(request.file_path).exists():
+            raise HTTPException(status_code=404, detail="文件不存在")
+        
+        # 解析Excel文件
+        excel_data = excel_parser.parse_excel_file(request.file_path)
+        
+        # 生成预览图
+        previews = chart_generator.generate_multiple_previews(
+            data=excel_data,
+            chart_types=request.chart_types,
+            width=request.width or 400,
+            height=request.height or 300
+        )
+        
+        response_data = PreviewGenerationResponse(
+            success=True,
+            message="预览图生成成功",
+            previews=previews,
+            file_info={"file_path": request.file_path}
+        )
+        
+        return create_success_response(response_data)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"预览图生成失败: {e}")
+        raise HTTPException(status_code=500, detail=f"预览图生成失败: {str(e)}")
+
+@router.post("/charts/previews/selected-generate", response_model=StandardResponse)
+async def generate_selected_charts(
+    request: SelectedChartsGenerationRequest,
+    db: Session = Depends(get_db)
+):
+    """生成选中的高质量图表（消耗访问码）"""
+    try:
+        service = AccessCodeService(db)
+        
+        # 验证访问码
+        is_valid, code_record, message = service.validate_access_code(request.access_code)
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=message)
+        
+        if not Path(request.file_path).exists():
+            raise HTTPException(status_code=404, detail="文件不存在")
+        
+        # 解析Excel文件
+        excel_data = excel_parser.parse_excel_file(request.file_path)
+        
+        # 生成选中的图表
+        charts = []
+        for chart_type in request.selected_chart_types:
+            chart_result = chart_generator.generate_chart(
+                data=excel_data,
+                chart_type=chart_type,
+                title=f"{chart_type}图表",
+                width=request.width or 800,
+                height=request.height or 600,
+                format=request.format or 'png'
+            )
+            
+            chart_info = GeneratedChartInfo(
+                chart_type=chart_type,
+                chart_name=chart_generator.get_chart_name(chart_type),
+                chart_data=chart_result['image_data'],
+                width=request.width or 800,
+                height=request.height or 600,
+                format=request.format or 'png',
+                file_size=len(chart_result['image_data']) if 'image_data' in chart_result else None
+            )
+            charts.append(chart_info)
+        
+        # 使用访问码（只消耗1次，不管生成多少图表）
+        success, use_message, _ = service.use_access_code(request.access_code)
+        if not success:
+            raise HTTPException(status_code=400, detail=use_message)
+        
+        response_data = SelectedChartsGenerationResponse(
+            success=True,
+            message="图表生成成功",
+            charts=charts,
+            remaining_usage=code_record.remaining_usage - 1 if code_record else None
+        )
+        
+        return create_success_response(response_data)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"选中图表生成失败: {e}")
+        raise HTTPException(status_code=500, detail=f"选中图表生成失败: {str(e)}")

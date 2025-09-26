@@ -21,19 +21,22 @@ from app.services.file_service import file_service
 from app.services.excel_service import excel_parser
 from app.services.chart_service import chart_generator
 from app.schemas import *
+from app.api_v1 import router as v1_router
+from app.monitoring import router as monitoring_router
+from app.exceptions import setup_exception_handlers
+from app.config import get_settings, get_cors_origins
+from app.security import setup_security_middleware, limiter
+from app.middleware import RequestTrackingMiddleware, PerformanceMonitoringMiddleware, SecurityLoggingMiddleware
 from pathlib import Path
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('logs/app.log'),
-        logging.StreamHandler()
-    ]
-)
+from app.logging_config import setup_logging, get_logger
+access_logger = setup_logging()
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
+
+# 获取应用配置
+settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -58,11 +61,26 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("Database connection failed")
     
+    # Start file cleanup task
+    try:
+        await file_service.start_cleanup_task()
+        logger.info("File cleanup task started")
+    except Exception as e:
+        logger.error(f"Failed to start file cleanup task: {e}")
+    
     logger.info("Application startup complete")
     
     yield
     
     logger.info("Shutting down Chart Generation API...")
+    
+    # Stop file cleanup task
+    try:
+        await file_service.stop_cleanup_task()
+        logger.info("File cleanup task stopped")
+    except Exception as e:
+        logger.error(f"Failed to stop file cleanup task: {e}")
+    
     logger.info("Application shutdown complete")
 
 # Create FastAPI app
@@ -76,14 +94,35 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",  # Vite dev server
-        "http://localhost:3000",  # React dev server
-    ],
+    allow_origins=get_cors_origins(),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Content-Type",
+        "Authorization",
+        "X-Requested-With",
+        "Accept",
+        "Origin",
+        "Access-Control-Allow-Origin",
+        "Access-Control-Allow-Methods",
+        "Access-Control-Allow-Headers"
+    ],
 )
+
+# 设置追踪和监控中间件
+app.add_middleware(RequestTrackingMiddleware)
+app.add_middleware(PerformanceMonitoringMiddleware)
+app.add_middleware(SecurityLoggingMiddleware)
+
+# 设置安全中间件
+app = setup_security_middleware(app)
+
+# 设置异常处理
+setup_exception_handlers(app)
+
+# 包含路由
+app.include_router(v1_router)
+app.include_router(monitoring_router)
 
 # Basic routes
 @app.get("/")
@@ -111,19 +150,21 @@ async def health_check():
 
 @app.get("/api/info")
 async def api_info():
-    """API information endpoint"""
+    """API information endpoint (legacy - use /api/v1/info instead)"""
     return {
         "name": "智能图表生成工具 API",
         "version": "1.0.0",
         "description": "基于Excel文件自动生成图表的API服务",
+        "note": "此端点已弃用，请使用 /api/v1/info",
         "endpoints": {
             "health": "/health",
-            "validate_access_code": "/api/validate-access-code",
-            "generate_chart": "/api/generate-chart",
-            "chart_types": "/api/chart-types"
+            "validate_access_code": "/api/validate-access-code (legacy)",
+            "generate_chart": "/api/generate-chart (legacy)",
+            "chart_types": "/api/chart-types (legacy)",
+            "v1_endpoints": "/api/v1/*"
         },
         "supported_file_formats": [".xlsx", ".xls"],
-        "supported_chart_types": ["bar", "line", "pie", "scatter", "area"]
+        "supported_chart_types": ["bar", "line", "pie", "scatter", "area", "heatmap", "box", "violin", "histogram"]
     }
 
 # Error handlers

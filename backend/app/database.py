@@ -5,14 +5,15 @@ from sqlalchemy import create_engine, MetaData
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
-import os
+from .config import get_database_url, get_settings
 from typing import Generator
 import logging
 
 logger = logging.getLogger(__name__)
 
-# 数据库配置
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./datachart.db")
+# 获取数据库配置
+settings = get_settings()
+DATABASE_URL = get_database_url()
 
 # 创建数据库引擎
 if DATABASE_URL.startswith("sqlite"):
