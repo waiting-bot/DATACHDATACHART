@@ -157,7 +157,11 @@ class ChartGenerationRequest(BaseModel):
     """图表生成请求模型"""
     access_code: str = Field(..., description="访问码")
     chart_type: Optional[ChartType] = Field(None, description="图表类型")
-    # 文件数据将在文件上传处理中获取
+    chart_data: Optional[Dict[str, Any]] = Field(None, description="图表数据（用于从数据生成图表）")
+    chart_title: Optional[str] = Field(None, description="图表标题")
+    width: Optional[int] = Field(None, description="图表宽度")
+    height: Optional[int] = Field(None, description="图表高度")
+    format: Optional[str] = Field(None, description="输出格式")
 
 class ChartGenerationResponse(BaseModel):
     """图表生成响应模型"""

@@ -15,10 +15,11 @@ from sqlalchemy.orm import Session
 
 # 导入应用模块
 from app.database import init_database, check_database_connection, get_db
-from app.models import Base
+from app.models import Base, UsageLog
 from app.services.access_code_service import AccessCodeService, UsageLogService, SystemConfigService
 from app.services.file_service import file_service
 from app.services.excel_service import excel_parser
+from app.services.chart_service import chart_generator
 from app.schemas import *
 
 # Configure logging
@@ -386,11 +387,183 @@ async def get_storage_stats():
         logger.error(f"获取存储统计失败: {e}")
         raise HTTPException(status_code=500, detail=f"获取存储统计失败: {str(e)}")
 
-# Placeholder for chart generation (will be implemented in next phase)
-@app.post("/api/generate-chart")
-async def generate_chart():
-    """Generate chart from Excel file - Placeholder"""
-    raise HTTPException(status_code=501, detail="This endpoint will be implemented in the next phase")
+# Chart Generation APIs
+@app.post("/api/generate-chart", response_model=ChartGenerationResponse)
+async def generate_chart(
+    file: UploadFile = File(...),
+    access_code: str = Form(...),
+    chart_type: Optional[ChartType] = Form('bar'),
+    chart_title: Optional[str] = Form('数据图表'),
+    width: Optional[int] = Form(800),
+    height: Optional[int] = Form(600),
+    format: Optional[str] = Form('png'),
+    db: Session = Depends(get_db)
+):
+    """生成图表"""
+    try:
+        start_time = datetime.now()
+        
+        # 1. 验证访问码
+        access_service = AccessCodeService(db)
+        is_valid, code_record, message = access_service.validate_access_code(access_code)
+        
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=message)
+        
+        if not code_record.can_use():
+            raise HTTPException(status_code=400, detail="访问码使用次数已达上限")
+        
+        # 2. 上传和处理文件
+        file_info = await file_service.save_uploaded_file(file, access_code, db)
+        
+        # 3. 解析Excel文件
+        parse_result = excel_parser.full_parse(
+            file_info['file_path'], 
+            chart_type.value if chart_type else 'bar'
+        )
+        
+        if not parse_result.get('success'):
+            raise HTTPException(status_code=400, detail=parse_result.get('message', 'Excel解析失败'))
+        
+        # 4. 生成图表
+        chart_data = parse_result.get('chart_data', {})
+        
+        # 优化图表尺寸
+        if width == 800 and height == 600:  # 使用默认值时才优化
+            optimized_width, optimized_height = chart_generator.optimize_chart_size(chart_data, chart_type.value)
+            width, height = optimized_width, optimized_height
+        
+        chart_result = chart_generator.generate_chart(
+            data=chart_data,
+            chart_type=chart_type.value,
+            title=chart_title or '数据图表',
+            width=width,
+            height=height,
+            format=format.lower()
+        )
+        
+        if not chart_result.get('success'):
+            raise HTTPException(status_code=500, detail=chart_result.get('message', '图表生成失败'))
+        
+        # 5. 更新访问码使用次数
+        usage_log = UsageLog(
+            access_code_id=code_record.id,
+            file_name=file.filename,
+            file_size=file.size,
+            chart_type=chart_type,
+            success=True,
+            processing_time=int((datetime.now() - start_time).total_seconds() * 1000)
+        )
+        db.add(usage_log)
+        code_record.increment_usage()
+        db.commit()
+        
+        # 6. 清理临时文件
+        try:
+            import os
+            if os.path.exists(file_info['file_path']):
+                os.remove(file_info['file_path'])
+        except Exception as e:
+            logger.warning(f"清理临时文件失败: {e}")
+        
+        return ChartGenerationResponse(
+            success=True,
+            message="图表生成成功",
+            chart_data=chart_result,
+            chart_type=chart_type,
+            remaining_usage=code_record.remaining_usage
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"图表生成失败: {e}")
+        raise HTTPException(status_code=500, detail=f"图表生成失败: {str(e)}")
+
+@app.post("/api/generate-chart-from-data", response_model=ChartGenerationResponse)
+async def generate_chart_from_data(
+    request: ChartGenerationRequest,
+    db: Session = Depends(get_db)
+):
+    """从已有数据生成图表"""
+    try:
+        # 1. 验证访问码
+        access_service = AccessCodeService(db)
+        is_valid, code_record, message = access_service.validate_access_code(request.access_code)
+        
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=message)
+        
+        if not code_record.can_use():
+            raise HTTPException(status_code=400, detail="访问码使用次数已达上限")
+        
+        # 2. 生成图表
+        chart_result = chart_generator.generate_chart(
+            data=request.chart_data,
+            chart_type=request.chart_type.value if request.chart_type else 'bar',
+            title=request.chart_title or '数据图表',
+            width=request.width or 800,
+            height=request.height or 600,
+            format=request.format or 'png'
+        )
+        
+        if not chart_result.get('success'):
+            raise HTTPException(status_code=500, detail=chart_result.get('message', '图表生成失败'))
+        
+        # 3. 更新访问码使用次数
+        usage_log = UsageLog(
+            access_code_id=code_record.id,
+            chart_type=request.chart_type,
+            success=True
+        )
+        db.add(usage_log)
+        code_record.increment_usage()
+        db.commit()
+        
+        return ChartGenerationResponse(
+            success=True,
+            message="图表生成成功",
+            chart_data=chart_result,
+            chart_type=request.chart_type,
+            remaining_usage=code_record.remaining_usage
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"图表生成失败: {e}")
+        raise HTTPException(status_code=500, detail=f"图表生成失败: {str(e)}")
+
+@app.get("/api/chart-suggestions")
+async def get_chart_suggestions(
+    file_path: str,
+    db: Session = Depends(get_db)
+):
+    """获取图表类型建议"""
+    try:
+        # 解析Excel文件
+        parse_result = excel_parser.full_parse(file_path, 'bar')
+        
+        if not parse_result.get('success'):
+            raise HTTPException(status_code=400, detail=parse_result.get('message', 'Excel解析失败'))
+        
+        chart_data = parse_result.get('chart_data', {})
+        
+        # 获取建议
+        suggestions = chart_generator.suggest_chart_type(chart_data)
+        
+        return {
+            "success": True,
+            "message": "图表类型建议获取成功",
+            "suggestions": suggestions,
+            "chart_data": chart_data
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取图表建议失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取图表建议失败: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run(
