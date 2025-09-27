@@ -86,8 +86,11 @@ class ChartGenerator:
             if chart_type not in self.supported_chart_types:
                 raise ValueError(f"不支持的图表类型: {chart_type}")
             
+            # 转换Excel数据格式到图表生成器格式
+            converted_data = self._convert_excel_data_to_chart_format(data)
+            
             # 生成图表（不包含标题，标题在主布局中设置）
-            fig = self.supported_chart_types[chart_type](data, "")
+            fig = self.supported_chart_types[chart_type](converted_data, "")
             
             # 应用默认布局（包含尺寸和标题）
             layout_config = self.default_layout.copy()
@@ -442,6 +445,51 @@ class ChartGenerator:
         fig.update_xaxes(title='数值')
         fig.update_yaxes(title='频次')
         return fig
+    
+    def _convert_excel_data_to_chart_format(self, excel_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        将Excel解析数据转换为图表生成器可用的格式
+        
+        Args:
+            excel_data: Excel解析器返回的数据
+            
+        Returns:
+            转换后的图表数据格式
+        """
+        try:
+            # 如果数据已经是正确的格式，直接返回
+            if 'data' in excel_data and 'columns' in excel_data:
+                return excel_data
+            
+            # 从Excel解析结果中提取数据
+            chart_info = excel_data.get('chart_data', {})
+            raw_data = chart_info.get('raw_data', {})
+            
+            # 获取列名和数据
+            columns = raw_data.get('columns', [])
+            data_rows = raw_data.get('data', [])
+            
+            if not columns or not data_rows:
+                raise ValueError("Excel数据格式不正确")
+            
+            # 转换为图表生成器格式
+            chart_data = []
+            for row in data_rows:
+                row_dict = {}
+                for i, value in enumerate(row):
+                    if i < len(columns):
+                        row_dict[columns[i]] = value
+                chart_data.append(row_dict)
+            
+            return {
+                'data': chart_data,
+                'columns': columns,
+                'raw_data': raw_data
+            }
+            
+        except Exception as e:
+            logger.error(f"数据格式转换失败: {e}")
+            raise ValueError(f"数据格式转换失败: {str(e)}")
     
     def _convert_to_png(self, fig: go.Figure, width: int, height: int) -> str:
         """转换为 PNG 格式 (Base64)"""

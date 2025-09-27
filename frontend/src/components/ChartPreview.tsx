@@ -47,7 +47,8 @@ const ChartPreview: React.FC<ChartPreviewProps> = ({
     setError('')
 
     try {
-      const response = await fetch('http://localhost:8000/api/v1/generate-previews', {
+      const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+      const response = await fetch(`${apiBaseUrl}/api/v1/charts/previews/generate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

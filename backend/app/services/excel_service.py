@@ -49,6 +49,141 @@ class ExcelParser:
         self.max_rows = 10000  # 最大行数限制
         self.max_cols = 100    # 最大列数限制
     
+    def parse_excel_file(self, file_path: str) -> Dict[str, Any]:
+        """
+        解析Excel文件并返回图表可用格式
+        
+        Args:
+            file_path: Excel文件路径
+            
+        Returns:
+            解析后的图表数据
+        """
+        try:
+            if not Path(file_path).exists():
+                raise FileNotFoundError(f"文件不存在: {file_path}")
+            
+            # 尝试读取Excel文件
+            excel_file = pd.ExcelFile(file_path)
+            sheet_names = excel_file.sheet_names
+            
+            if not sheet_names:
+                raise ValueError("Excel文件中没有找到工作表")
+            
+            logger.info(f"读取Excel文件成功，工作表: {sheet_names}")
+            
+            # 解析第一个sheet作为主数据
+            main_sheet = sheet_names[0]
+            df = pd.read_excel(file_path, sheet_name=main_sheet)
+            
+            # 数据清洗和预处理
+            df = df.dropna(how='all')  # 删除全空行
+            df = df.dropna(how='all', axis=1)  # 删除全空列
+            
+            if df.empty:
+                raise ValueError("Excel文件中没有有效数据")
+            
+            # 提取列名和数据
+            columns = df.columns.tolist()
+            data = df.values.tolist()
+            
+            # 尝试识别数据类型
+            data_types = {}
+            for col in columns:
+                try:
+                    # 尝试转换为数值
+                    pd.to_numeric(df[col], errors='raise')
+                    data_types[col] = 'numeric'
+                except:
+                    data_types[col] = 'string'
+            
+            # 构建图表可用数据结构
+            chart_data = {
+                'labels': columns,
+                'datasets': [],
+                'raw_data': {
+                    'columns': columns,
+                    'data': data,
+                    'data_types': data_types,
+                    'shape': df.shape
+                }
+            }
+            
+            # 为每列创建数据集
+            for i, col in enumerate(columns):
+                if data_types[col] == 'numeric':
+                    chart_data['datasets'].append({
+                        'label': col,
+                        'data': df[col].dropna().tolist(),
+                        'type': 'numeric'
+                    })
+            
+            # 添加元数据
+            result = {
+                'success': True,
+                'message': 'Excel文件解析成功',
+                'file_info': {
+                    'file_path': file_path,
+                    'sheet_names': sheet_names,
+                    'main_sheet': main_sheet,
+                    'total_rows': len(df),
+                    'total_columns': len(columns)
+                },
+                'data_validation': {
+                    'has_data': not df.empty,
+                    'has_numeric_data': any(dt == 'numeric' for dt in data_types.values()),
+                    'has_categorical_data': any(dt == 'string' for dt in data_types.values())
+                },
+                'chart_data': chart_data,
+                'data_types': data_types,
+                'suggested_charts': self._suggest_chart_types(data_types),
+                'summary': {
+                    'total_rows': len(df),
+                    'total_columns': len(columns),
+                    'numeric_columns': sum(1 for dt in data_types.values() if dt == 'numeric'),
+                    'categorical_columns': sum(1 for dt in data_types.values() if dt == 'string')
+                }
+            }
+            
+            logger.info(f"Excel文件解析完成: {result['summary']}")
+            return convert_numpy_types(result)
+            
+        except Exception as e:
+            logger.error(f"Excel文件解析失败: {e}")
+            raise
+    
+    def _suggest_chart_types(self, data_types: Dict[str, str]) -> List[str]:
+        """
+        根据数据类型推荐图表类型
+        
+        Args:
+            data_types: 数据类型字典
+            
+        Returns:
+            推荐的图表类型列表
+        """
+        numeric_cols = sum(1 for dt in data_types.values() if dt == 'numeric')
+        categorical_cols = sum(1 for dt in data_types.values() if dt == 'string')
+        
+        suggestions = []
+        
+        if numeric_cols >= 1:
+            suggestions.extend(['bar', 'line'])
+        
+        if numeric_cols >= 2:
+            suggestions.extend(['scatter', 'area'])
+        
+        if categorical_cols >= 1 and numeric_cols >= 1:
+            suggestions.append('pie')
+        
+        if numeric_cols >= 1:
+            suggestions.extend(['box', 'histogram'])
+        
+        if numeric_cols >= 2:
+            suggestions.append('heatmap')
+        
+        return list(set(suggestions))  # 去重
+
     def read_excel_file(self, file_path: str) -> Dict[str, Any]:
         """
         读取Excel文件

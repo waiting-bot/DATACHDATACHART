@@ -6,7 +6,8 @@ const Header: React.FC<HeaderProps> = ({
   title = '智能图表生成工具',
   onLogoClick,
   showStatus = true,
-  className = ''
+  className = '',
+  extraActions
 }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false)
 
@@ -77,6 +78,8 @@ const Header: React.FC<HeaderProps> = ({
 
           {/* 右侧按钮 */}
           <div className="flex items-center gap-3">
+            {/* 额外操作 */}
+            {extraActions}
             {/* 帮助按钮 */}
             <button
               onClick={() => {

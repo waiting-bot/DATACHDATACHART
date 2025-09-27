@@ -1,16 +1,13 @@
-import React, { useEffect, useCallback } from 'react'
+import React, { useEffect, useCallback, useState } from 'react'
 import { useAppStore, WorkflowStep } from '@/store'
 import Header from '@/components/Header'
 import StatusBar from '@/components/StatusBar'
 import WorkflowStepper from '@/components/WorkflowStepper'
-import AccessCodeInput from '@/components/AccessCodeInput'
 import FileUpload from '@/components/FileUpload'
 import ChartTypeSelector from '@/components/ChartTypeSelector'
-import ChartPreview from '@/components/ChartPreview'
 import ChartDisplay from '@/components/ChartDisplay'
-import PWAInstallPrompt from '@/components/PWAInstallPrompt'
 import { useApi } from '@/hooks/useApi'
-import { pwaManager } from '@/utils/pwa'
+import { Key, CheckCircle, AlertCircle, Shield } from 'lucide-react'
 
 // 工作流步骤配置
 const workflowSteps = [
@@ -49,19 +46,16 @@ const App: React.FC = () => {
     maxUsage,
     uploadedFile,
     uploadedFilePath,
-    chartPreviews,
     selectedChartTypes,
     generatedCharts,
     isLoading,
     error,
     setStep,
     nextStep,
-    previousStep,
     setAccessCode,
     validateAccessCode,
     setUploadedFile,
-    setChartPreviews,
-    setSelectedChartTypes,
+      setSelectedChartTypes,
     setGeneratedCharts,
     setLoading,
     setError,
@@ -74,9 +68,9 @@ const App: React.FC = () => {
   useEffect(() => {
     const initApp = async () => {
       try {
-        await checkHealth(() => {
-          console.log('Backend service is healthy')
-        }, (error) => {
+        await checkHealth(
+          () => Promise.resolve({ success: true, data: {} }),
+          (error) => {
           console.warn('Backend health check failed:', error)
         })
       } catch (err) {
@@ -87,85 +81,63 @@ const App: React.FC = () => {
     initApp()
   }, [checkHealth])
 
-  // PWA 初始化
-  useEffect(() => {
-    // 开发阶段禁用 PWA 功能
-    if (import.meta.env.DEV || !pwaManager) {
-      console.log('PWA disabled in development mode')
-      return
-    }
+    // PWA 初始化 - 已禁用
+    useEffect(() => {
+      // 开发阶段禁用 PWA 功能
+      if (import.meta.env.DEV) {
+        console.log('PWA disabled in development mode')
+        return
+      }
 
-    // 检查 PWA 状态
-    const pwaStatus = pwaManager.getPWAStatus()
-    console.log('PWA Status:', pwaStatus)
-
-    // 监听网络状态变化
-    const handleOnline = () => {
-      console.log('Network connection restored')
-      // 可以在这里添加网络恢复后的逻辑
-    }
-
-    const handleOffline = () => {
-      console.log('Network connection lost')
-      // 可以在这里添加离线状态处理
-    }
-
-    window.addEventListener('online', handleOnline)
-    window.addEventListener('offline', handleOffline)
-
-    return () => {
-      window.removeEventListener('online', handleOnline)
-      window.removeEventListener('offline', handleOffline)
-      pwaManager.destroy()
-    }
-  }, [])
-
-  // 处理访问码验证
-  const handleAccessCodeValidated = useCallback(async (accessCodeInfo: any) => {
-    if (accessCodeInfo.remaining_usage > 0) {
-      setTimeout(() => {
-        nextStep()
-      }, 1000)
-    } else {
-      setError('访问码使用次数已用完', 'ACCESS_CODE_EXHAUSTED')
-    }
-  }, [nextStep, setError])
+      // PWA功能已禁用
+      console.log('PWA features disabled for MVP')
+    }, [])
 
   // 处理文件上传成功
   const handleFileUploadSuccess = useCallback(async (response: any) => {
-    if (response.success && response.file_info) {
-      setUploadedFile(uploadedFile!, response.file_info.file_path)
+    if (response.success && response.data && response.data.file_info) {
+      setLoading(true, '文件上传成功，正在解析数据...')
+      setUploadedFile(uploadedFile, response.data.file_info.file_path)
       
-      // 自动生成预览图
+      // 短暂延迟让用户看到成功状态
       setTimeout(() => {
+        setLoading(false)
         nextStep()
-      }, 1000)
+      }, 1500)
     }
-  }, [uploadedFile, setUploadedFile, nextStep])
+  }, [uploadedFile, setUploadedFile, nextStep, setLoading])
 
-  // 处理预览图生成
-  const handlePreviewGenerated = useCallback((previews: any[]) => {
-    setChartPreviews(previews)
-    
-    // 如果预览图生成成功，自动推荐图表类型
-    if (previews.length > 0) {
-      const recommendedTypes = previews.slice(0, 3).map(p => p.chart_type)
-      setSelectedChartTypes(recommendedTypes)
-    }
-  }, [setChartPreviews, setSelectedChartTypes])
+  // 预览图功能已简化
 
   // 处理图表生成
   const handleChartGenerate = useCallback(async () => {
-    if (!uploadedFilePath || selectedChartTypes.length === 0 || !accessCode) {
-      setError('请确保已选择图表类型', 'VALIDATION_ERROR')
+    console.log('生成图表检查:', {
+      uploadedFilePath: !!uploadedFilePath,
+      selectedChartTypes: selectedChartTypes,
+      selectedChartTypesLength: selectedChartTypes.length,
+      accessCode: !!accessCode
+    })
+    
+    if (!uploadedFilePath) {
+      setError('请先上传文件', 'NO_FILE_UPLOADED')
+      return
+    }
+    
+    if (selectedChartTypes.length === 0) {
+      setError('请选择至少一种图表类型', 'NO_CHART_TYPES_SELECTED')
+      return
+    }
+    
+    if (!accessCode) {
+      setError('请先验证访问码', 'NO_ACCESS_CODE')
       return
     }
 
-    setLoading(true, '正在生成图表...')
+    setLoading(true, '正在生成图表，请稍候...')
 
     try {
       const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-      const response = await fetch(`${apiBaseUrl}/api/v1/generate-selected-charts`, {
+      const response = await fetch(`${apiBaseUrl}/api/v1/charts/previews/selected-generate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -195,13 +167,17 @@ const App: React.FC = () => {
         }
         
         clearError()
-        nextStep()
+        setLoading(false)
+        // 显示成功状态后再跳转
+        setTimeout(() => {
+          nextStep()
+        }, 1000)
       } else {
         throw new Error('图表生成失败')
       }
     } catch (err: any) {
+      console.error('Chart generation error:', err)
       setError(err.message || '图表生成失败', 'CHART_GENERATION_FAILED')
-    } finally {
       setLoading(false)
     }
   }, [uploadedFilePath, selectedChartTypes, accessCode, setLoading, setError, clearError, setGeneratedCharts, nextStep])
@@ -216,6 +192,50 @@ const App: React.FC = () => {
     // 下载逻辑由 ChartDisplay 组件处理
     console.log('Downloading chart:', chart.chart_name)
   }, [accessCode, remainingUsage, setError])
+
+  // 网络状态检测
+  const [isOnline, setIsOnline] = useState(true)
+  
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true)
+      clearError()
+    }
+    
+    const handleOffline = () => {
+      setIsOnline(false)
+      setError('网络连接已断开，请检查网络设置', 'NETWORK_OFFLINE')
+    }
+    
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    
+    // 初始状态检查
+    setIsOnline(navigator.onLine)
+    
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [clearError, setError])
+
+  // 简化的初始化 - 移除不必要的功能
+
+  // 获取图表显示名称
+  const getChartDisplayName = useCallback((type: string) => {
+    const names: Record<string, string> = {
+      'bar': '柱状图',
+      'line': '折线图', 
+      'pie': '饼图',
+      'scatter': '散点图',
+      'area': '面积图',
+      'heatmap': '热力图',
+      'box': '箱线图',
+      'violin': '小提琴图',
+      'histogram': '直方图'
+    }
+    return names[type] || type
+  }, [])
 
   // 获取当前步骤组件
   const renderCurrentStep = () => {
@@ -253,47 +273,132 @@ const App: React.FC = () => {
                 </p>
               </div>
               
-              {/* 功能特点卡片 */}
-              <div className="grid md:grid-cols-3 gap-6 mb-8">
-                <div className="card p-6 text-center">
-                  <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mx-auto mb-4">
-                    <span className="text-2xl">📊</span>
+                          {/* 主要内容区域 - 简化布局 */}
+              <div className="max-w-md mx-auto">
+                {/* 核心价值主张 */}
+                <div className="text-center mb-8">
+                  <div className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-50 to-purple-50 rounded-full mb-6">
+                    <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                    <span className="text-sm font-medium text-gray-700">AI驱动的智能图表生成</span>
                   </div>
-                  <h3 className="font-semibold text-gray-900 mb-2">多种图表</h3>
-                  <p className="text-sm text-gray-600">支持柱状图、折线图、饼图等多种图表类型</p>
+                  
+                  <div className="grid grid-cols-3 gap-4 mb-6">
+                    <div className="text-center">
+                      <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center mx-auto mb-2">
+                        <span className="text-xl">📊</span>
+                      </div>
+                      <p className="text-xs text-gray-600">多种图表</p>
+                    </div>
+                    <div className="text-center">
+                      <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center mx-auto mb-2">
+                        <span className="text-xl">⚡</span>
+                      </div>
+                      <p className="text-xs text-gray-600">快速生成</p>
+                    </div>
+                    <div className="text-center">
+                      <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center mx-auto mb-2">
+                        <span className="text-xl">🎨</span>
+                      </div>
+                      <p className="text-xs text-gray-600">透明背景</p>
+                    </div>
+                  </div>
                 </div>
                 
-                <div className="card p-6 text-center">
-                  <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mx-auto mb-4">
-                    <span className="text-2xl">⚡</span>
+                {/* 访问码输入 */}
+                <div className="bg-white rounded-2xl p-8 shadow-lg border border-gray-100">
+                  <div className="text-center mb-6">
+                    <div className="flex items-center justify-center gap-2 mb-2">
+                      <Shield className="w-6 h-6 text-blue-600" />
+                      <h2 className="text-lg font-bold text-gray-900">访问码验证</h2>
+                    </div>
+                    <p className="text-gray-500 text-sm">
+                      请输入您购买的访问码以开始使用
+                    </p>
                   </div>
-                  <h3 className="font-semibold text-gray-900 mb-2">快速生成</h3>
-                  <p className="text-sm text-gray-600">上传Excel文件，秒级生成高质量图表</p>
-                </div>
-                
-                <div className="card p-6 text-center">
-                  <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center mx-auto mb-4">
-                    <span className="text-2xl">🎨</span>
+                  
+                  {/* 访问码输入框 */}
+                  <div className="relative mb-4">
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <Key className="h-4 w-4 text-gray-400" />
+                      </div>
+                      <input
+                        type="text"
+                        value={accessCode}
+                        onChange={(e) => setAccessCode(e.target.value)}
+                        placeholder="请输入访问码"
+                        disabled={isLoading && loadingMessage.includes('验证')}
+                        className={`
+                          w-full pl-10 pr-10 py-3 border-2 rounded-lg transition-all duration-200
+                          focus:outline-none focus:ring-2 focus:ring-offset-1
+                          ${error
+                            ? 'border-red-300 focus:border-red-500 focus:ring-red-200'
+                            : accessCode.length >= 6
+                            ? 'border-green-300 focus:border-green-500 focus:ring-green-200'
+                            : 'border-gray-200 focus:border-blue-500 focus:ring-blue-200'
+                          }
+                          ${isLoading && loadingMessage.includes('验证') ? 'opacity-60 bg-gray-50' : 'bg-white'}
+                        `}
+                      />
+                      
+                      {/* 验证状态图标 */}
+                      {accessCode && !(isLoading && loadingMessage.includes('验证')) && (
+                        <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
+                          {accessCode.length >= 6 && !error ? (
+                            <CheckCircle className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <AlertCircle className="h-4 w-4 text-red-500" />
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 验证消息 */}
+                    {error && (
+                      <div className="mt-2 text-sm text-red-600">
+                        {error}
+                      </div>
+                    )}
                   </div>
-                  <h3 className="font-semibold text-gray-900 mb-2">透明背景</h3>
-                  <p className="text-sm text-gray-600">PNG/SVG格式，透明背景，便于设计使用</p>
+
+                  {/* 验证按钮 */}
+                  <button
+                    onClick={() => {
+                      if (accessCode.trim() && accessCode.length >= 6) {
+                        validateAccessCode(accessCode)
+                      }
+                    }}
+                    disabled={accessCode.length < 6 || (isLoading && loadingMessage.includes('验证'))}
+                    className={`
+                      w-full py-3 px-4 rounded-lg font-medium transition-all duration-200
+                      flex items-center justify-center gap-2
+                      ${accessCode.length < 6 || (isLoading && loadingMessage.includes('验证'))
+                        ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                        : 'bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:from-blue-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 shadow-lg hover:shadow-xl'
+                      }
+                    `}
+                  >
+                    {isLoading && loadingMessage.includes('验证') ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                        验证中...
+                      </>
+                    ) : (
+                      <>
+                        <Shield className="w-4 h-4" />
+                        验证访问码
+                      </>
+                    )}
+                  </button>
+
+                  {/* 使用提示 */}
+                  <div className="mt-4 text-center">
+                    <div className="inline-flex items-center gap-2 text-xs text-gray-400">
+                      <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></div>
+                      <span>访问码在小红书店铺购买获得</span>
+                    </div>
+                  </div>
                 </div>
-              </div>
-              
-              {/* 访问码输入 */}
-              <div className="glass rounded-2xl p-8 backdrop-blur-sm">
-                <AccessCodeInput
-                  value={accessCode}
-                  onChange={setAccessCode}
-                  onValidate={(isValid) => {
-                    if (isValid) {
-                      validateAccessCode(accessCode)
-                    }
-                  }}
-                  onValidated={handleAccessCodeValidated}
-                  loading={isLoading && loadingMessage.includes('验证')}
-                  error={error}
-                />
               </div>
             </div>
           </div>
@@ -301,35 +406,44 @@ const App: React.FC = () => {
 
       case WorkflowStep.FILE_UPLOAD:
         return (
-          <div className="max-w-2xl mx-auto">
+          <div className="max-w-4xl mx-auto">
             <div className="text-center mb-8">
               <h2 className="text-2xl font-bold text-gray-900 mb-2">上传数据文件</h2>
               <p className="text-gray-600">
                 上传您的 Excel 文件，我们将自动解析并生成相应的图表
               </p>
             </div>
-            <FileUpload
-              onFileSelect={(file) => {
-                setUploadedFile(file)
-              }}
-              onUploadSuccess={handleFileUploadSuccess}
-              onUploadError={(error) => {
-                setError(error, 'FILE_UPLOAD_ERROR')
-              }}
-              accessCode={accessCode}
-              disabled={!isAccessCodeValid || isLoading}
-            />
-            {uploadedFile && (
-              <div className="mt-6 text-center">
-                <button
-                  onClick={nextStep}
-                  disabled={!isAccessCodeValid || isLoading}
-                  className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  继续生成图表
-                </button>
-              </div>
-            )}
+            
+            <div className="glass rounded-2xl p-8 backdrop-blur-sm border border-white/20">
+              <FileUpload
+                onFileSelect={(file) => {
+                  setUploadedFile(file)
+                }}
+                onUploadSuccess={handleFileUploadSuccess}
+                onUploadError={(error) => {
+                  setError(error, 'FILE_UPLOAD_ERROR')
+                }}
+                accessCode={accessCode}
+                disabled={!isAccessCodeValid || isLoading}
+              />
+              
+              {uploadedFile && (
+                <div className="mt-6 text-center">
+                  <div className="inline-flex items-center gap-3 px-6 py-3 bg-green-100 text-green-700 rounded-full">
+                    <CheckCircle className="w-5 h-5" />
+                    <span className="font-medium">文件上传成功！</span>
+                  </div>
+                  
+                  <button
+                    onClick={nextStep}
+                    disabled={!isAccessCodeValid || isLoading}
+                    className="mt-4 px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200"
+                  >
+                    继续生成图表
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         )
 
@@ -350,23 +464,35 @@ const App: React.FC = () => {
             {/* 图表类型选择 */}
             <ChartTypeSelector
               selectedTypes={selectedChartTypes}
-              onSelectionChange={setSelectedChartTypes}
+              onSelectionChange={(types) => {
+                console.log('图表类型选择变更:', types)
+                setSelectedChartTypes(types)
+              }}
               multiSelect={true}
-              disabled={isLoading}
+              disabled={false}
+              loading={isLoading}
               showPreviews={false}
             />
 
-            {/* 预览图生成 */}
-            <ChartPreview
-              filePath={uploadedFilePath || undefined}
-              accessCode={accessCode}
-              chartTypes={selectedChartTypes}
-              onPreviewGenerated={handlePreviewGenerated}
-              onPreviewError={(error) => {
-                setError(error, 'PREVIEW_GENERATION_FAILED')
-              }}
-              autoGenerate={selectedChartTypes.length > 0}
-            />
+            {/* 图表生成信息 */}
+            <div className="bg-blue-50 rounded-lg p-6 text-center border border-blue-200">
+              <div className="flex items-center justify-center gap-3 mb-3">
+                <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                  <span className="text-blue-600 text-sm">📊</span>
+                </div>
+                <h3 className="text-lg font-medium text-blue-900">准备生成图表</h3>
+              </div>
+              <p className="text-blue-700 text-sm mb-4">
+                已选择 {selectedChartTypes.length} 种图表类型，确认后开始生成高质量图表
+              </p>
+              <div className="flex flex-wrap gap-2 justify-center">
+                {selectedChartTypes.map((type) => (
+                  <span key={type} className="px-2 py-1 bg-blue-100 text-blue-700 rounded-full text-xs">
+                    {getChartDisplayName(type)}
+                  </span>
+                ))}
+              </div>
+            </div>
 
             {/* 生成按钮 */}
             <div className="flex justify-center">
@@ -397,7 +523,7 @@ const App: React.FC = () => {
               charts={generatedCharts}
               accessCode={accessCode}
               onDownload={handleChartDownload}
-              remainingUsage={remainingUsage}
+              remainingUsage={remainingUsage || undefined}
             />
             
             {uploadedFilePath && (
@@ -423,6 +549,7 @@ const App: React.FC = () => {
   }
 
   const loadingMessage = isLoading ? '加载中...' : ''
+  const errorCode = null // 这里可以从 store 中获取
 
   return (
     <div className="min-h-screen gradient-bg flex flex-col viewport-fix no-double-tap-zoom text-mobile" 
@@ -439,12 +566,13 @@ const App: React.FC = () => {
           // 重置到第一步
           setStep(WorkflowStep.ACCESS_CODE)
         }}
+        extraActions={null}
       />
 
       {/* 状态栏 */}
       <StatusBar
-        remainingUsage={remainingUsage}
-        maxUsage={maxUsage}
+        remainingUsage={remainingUsage || 0}
+        maxUsage={maxUsage || 0}
         isAccessCodeValid={isAccessCodeValid}
         currentStep={currentStep}
       />
@@ -458,11 +586,36 @@ const App: React.FC = () => {
               currentStep={currentStep}
               steps={workflowSteps}
               onStepClick={(step) => {
-                // 只允许导航到已完成的步骤或下一步
-                const currentIndex = workflowSteps.findIndex(s => s.id === currentStep)
+                // 增强的导航逻辑 - 只允许导航到已完成的步骤或下一步
                 const targetIndex = workflowSteps.findIndex(s => s.id === step)
-                if (targetIndex <= currentIndex + 1) {
+                
+                // 检查前置条件
+                if (targetIndex === 0) { // 访问码步骤
                   setStep(step)
+                } else if (targetIndex === 1) { // 文件上传步骤
+                  if (isAccessCodeValid) {
+                    setStep(step)
+                  } else {
+                    setError('请先验证访问码', 'INVALID_ACCESS_CODE')
+                  }
+                } else if (targetIndex === 2) { // 图表生成步骤
+                  if (isAccessCodeValid && uploadedFile) {
+                    setStep(step)
+                  } else if (!isAccessCodeValid) {
+                    setError('请先验证访问码', 'INVALID_ACCESS_CODE')
+                  } else if (!uploadedFile) {
+                    setError('请先上传文件', 'NO_FILE_UPLOADED')
+                  }
+                } else if (targetIndex === 3) { // 图表显示步骤
+                  if (isAccessCodeValid && uploadedFile && generatedCharts.length > 0) {
+                    setStep(step)
+                  } else if (!isAccessCodeValid) {
+                    setError('请先验证访问码', 'INVALID_ACCESS_CODE')
+                  } else if (!uploadedFile) {
+                    setError('请先上传文件', 'NO_FILE_UPLOADED')
+                  } else if (generatedCharts.length === 0) {
+                    setError('请先生成图表', 'NO_CHARTS_GENERATED')
+                  }
                 }
               }}
             />
@@ -471,17 +624,78 @@ const App: React.FC = () => {
 
         {/* 内容区域 */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {/* 错误提示 */}
+          {/* 网络状态提示 */}
+          {!isOnline && (
+            <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-xl animate-slide-up">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 bg-yellow-100 rounded-full flex items-center justify-center">
+                    <span className="text-yellow-600">📡</span>
+                  </div>
+                  <div>
+                    <h4 className="text-yellow-800 font-medium">网络连接已断开</h4>
+                    <p className="text-yellow-700 text-sm mt-1">请检查您的网络连接后重试</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="text-yellow-600 hover:text-yellow-800 text-sm font-medium px-3 py-1 border border-yellow-300 rounded hover:bg-yellow-100"
+                >
+                  刷新页面
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 错误提示 - 增强版 */}
           {error && (
             <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl animate-slide-up">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="text-red-800 font-medium">操作失败</h4>
-                  <p className="text-red-700 text-sm mt-1">{error}</p>
+              <div className="flex items-start justify-between">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
+                    <span className="text-red-600">⚠️</span>
+                  </div>
+                  <div>
+                    <h4 className="text-red-800 font-medium">操作失败</h4>
+                    <p className="text-red-700 text-sm mt-1">{error}</p>
+                    
+                    {/* 根据错误类型提供解决方案 */}
+                    {errorCode === 'ACCESS_CODE_EXHAUSTED' && (
+                      <div className="mt-3 p-3 bg-red-100 rounded-lg">
+                        <p className="text-red-800 text-sm font-medium mb-2">解决方案：</p>
+                        <ul className="text-red-700 text-sm space-y-1">
+                          <li>• 购买新的访问码</li>
+                          <li>• 联系客服获取帮助</li>
+                        </ul>
+                      </div>
+                    )}
+                    
+                    {errorCode === 'NETWORK_ERROR' && (
+                      <div className="mt-3 p-3 bg-red-100 rounded-lg">
+                        <p className="text-red-800 text-sm font-medium mb-2">网络问题：</p>
+                        <ul className="text-red-700 text-sm space-y-1">
+                          <li>• 检查网络连接</li>
+                          <li>• 稍后重试</li>
+                          <li>• 刷新页面</li>
+                        </ul>
+                      </div>
+                    )}
+                    
+                    {errorCode === 'FILE_UPLOAD_ERROR' && (
+                      <div className="mt-3 p-3 bg-red-100 rounded-lg">
+                        <p className="text-red-800 text-sm font-medium mb-2">文件问题：</p>
+                        <ul className="text-red-700 text-sm space-y-1">
+                          <li>• 确保文件格式为 .xlsx 或 .xls</li>
+                          <li>• 文件大小不超过 10MB</li>
+                          <li>• 文件未损坏</li>
+                        </ul>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <button
                   onClick={clearError}
-                  className="text-red-600 hover:text-red-800 text-sm font-medium"
+                  className="text-red-600 hover:text-red-800 text-sm font-medium px-3 py-1 border border-red-300 rounded hover:bg-red-100 flex-shrink-0"
                 >
                   关闭
                 </button>
@@ -489,12 +703,25 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {/* 加载状态 */}
+          {/* 加载状态 - 增强版 */}
           {isLoading && (
             <div className="mb-6 p-6 bg-blue-50 border border-blue-200 rounded-xl animate-fade-in">
-              <div className="flex items-center justify-center gap-3">
-                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-                <span className="text-blue-800 font-medium">{loadingMessage}</span>
+              <div className="flex items-center justify-center gap-4">
+                <div className="relative">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                  <div className="absolute inset-0 rounded-full h-8 w-8 border-t-2 border-blue-300 animate-pulse"></div>
+                </div>
+                <div className="text-center">
+                  <p className="text-blue-800 font-medium">{loadingMessage}</p>
+                  {loadingMessage.includes('生成') && (
+                    <p className="text-blue-600 text-sm mt-1">这可能需要几秒钟时间</p>
+                  )}
+                </div>
+              </div>
+              
+              {/* 进度条动画 */}
+              <div className="mt-4 w-full bg-blue-100 rounded-full h-2 overflow-hidden">
+                <div className="bg-blue-500 h-full rounded-full animate-progress"></div>
               </div>
             </div>
           )}
@@ -506,72 +733,38 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      {/* 页脚 */}
-      <footer className="bg-white/80 backdrop-blur-sm border-t border-gray-200 mt-auto">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-            {/* 品牌信息 */}
-            <div className="md:col-span-2">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="flex items-center justify-center w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg">
-                  <span className="text-white text-lg font-bold">📊</span>
-                </div>
-                <span className="text-xl font-bold text-gray-900">DataChart</span>
+      {/* 简化页脚 */}
+      <footer className="bg-white/80 backdrop-blur-sm border-t border-gray-200 mt-auto py-6">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col md:flex-row justify-between items-center">
+            <div className="flex items-center gap-3 mb-4 md:mb-0">
+              <div className="flex items-center justify-center w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg">
+                <span className="text-white text-sm font-bold">📊</span>
               </div>
-              <p className="text-gray-600 mb-4">
-                AI驱动的智能图表生成工具，让数据可视化变得简单高效。
-              </p>
-              <div className="flex items-center gap-4 text-sm text-gray-500">
-                <span>支持Excel文件</span>
-                <span>•</span>
-                <span>透明背景</span>
-                <span>•</span>
-                <span>快速生成</span>
-              </div>
+              <span className="text-lg font-bold text-gray-900">DataChart</span>
             </div>
-            
-            {/* 产品链接 */}
-            <div>
-              <h3 className="font-semibold text-gray-900 mb-4">产品功能</h3>
-              <ul className="space-y-2 text-sm text-gray-600">
-                <li><a href="#" className="hover:text-blue-600 transition-colors">图表类型</a></li>
-                <li><a href="#" className="hover:text-blue-600 transition-colors">文件格式</a></li>
-                <li><a href="#" className="hover:text-blue-600 transition-colors">使用教程</a></li>
-                <li><a href="#" className="hover:text-blue-600 transition-colors">常见问题</a></li>
-              </ul>
+            <div className="flex items-center gap-4 text-sm text-gray-500">
+              <span>AI智能图表生成</span>
+              <span>•</span>
+              <span>透明背景</span>
+              <span>•</span>
+              <span>快速生成</span>
             </div>
-            
-            {/* 支持链接 */}
-            <div>
-              <h3 className="font-semibold text-gray-900 mb-4">支持服务</h3>
-              <ul className="space-y-2 text-sm text-gray-600">
-                <li><a href="#" className="hover:text-blue-600 transition-colors">隐私政策</a></li>
-                <li><a href="#" className="hover:text-blue-600 transition-colors">服务条款</a></li>
-                <li><a href="#" className="hover:text-blue-600 transition-colors">联系我们</a></li>
-                <li><a href="#" className="hover:text-blue-600 transition-colors">反馈建议</a></li>
-              </ul>
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+              <span className="text-sm text-green-600">系统正常</span>
             </div>
           </div>
-          
-          <div className="border-t border-gray-200 mt-8 pt-8">
-            <div className="flex flex-col md:flex-row justify-between items-center">
-              <p className="text-sm text-gray-500">
-                &copy; 2024 DataChart. 保留所有权利.
-              </p>
-              <div className="flex items-center gap-6 mt-4 md:mt-0">
-                <span className="text-sm text-gray-500">技术支持：AI + Python + React</span>
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                  <span className="text-sm text-green-600">系统正常</span>
-                </div>
-              </div>
-            </div>
+          <div className="text-center mt-4">
+            <p className="text-xs text-gray-400">
+              &copy; 2024 DataChart. 保留所有权利.
+            </p>
           </div>
         </div>
       </footer>
 
-      {/* PWA 安装提示 */}
-      <PWAInstallPrompt />
+      {/* PWA 安装提示 - 简化版 */}
+      {/* 用户指南功能已移除以简化界面 */}
     </div>
   )
 }

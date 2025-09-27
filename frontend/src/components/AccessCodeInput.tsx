@@ -61,7 +61,8 @@ const AccessCodeInput: React.FC<AccessCodeInputProps> = ({
     }
 
     try {
-      const response = await fetch('http://localhost:8000/api/v1/validate-access-code', {
+      const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+      const response = await fetch(`${apiBaseUrl}/api/v1/access-codes/validate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

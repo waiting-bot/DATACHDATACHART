@@ -244,14 +244,17 @@ const FileUpload: React.FC<FileUploadProps> = ({
   const isUploadDisabled = disabled || isUploading || !accessCode.trim()
 
   return (
-    <div className="w-full max-w-md mx-auto">
+    <div className="w-full">
       <div
         className={`
-          relative border-2 border-dashed rounded-lg p-8 text-center transition-all duration-200
-          ${isDragOver ? 'border-blue-500 bg-blue-50' : 'border-gray-300'}
-          ${isUploadDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-blue-400'}
-          ${uploadStatus === 'success' ? 'border-green-500 bg-green-50' : ''}
-          ${uploadStatus === 'error' ? 'border-red-500 bg-red-50' : ''}
+          relative border-2 border-dashed rounded-2xl p-12 text-center transition-all duration-300 backdrop-blur-sm
+          ${isDragOver 
+            ? 'border-blue-400 bg-blue-50/50 shadow-lg transform scale-105' 
+            : 'border-gray-300 bg-white/50'
+          }
+          ${isUploadDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-blue-300 hover:shadow-md'}
+          ${uploadStatus === 'success' ? 'border-green-400 bg-green-50/50' : ''}
+          ${uploadStatus === 'error' ? 'border-red-400 bg-red-50/50' : ''}
         `}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -289,34 +292,46 @@ const FileUpload: React.FC<FileUploadProps> = ({
 
         {/* 状态消息 */}
         {uploadStatus === 'idle' && !fileName && (
-          <div>
-            <p className="text-lg font-medium text-gray-700 mb-2">
-              拖拽文件到此处或点击上传
-            </p>
-            <p className="text-sm text-gray-500">
-              支持 {acceptedTypes.join(', ')} 文件，最大 {formatFileSize(maxFileSize)}
-            </p>
+          <div className="space-y-4">
+            <div className="w-16 h-16 bg-gradient-to-br from-blue-100 to-purple-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Upload className="w-8 h-8 text-blue-600" />
+            </div>
+            <div>
+              <p className="text-xl font-medium text-gray-900 mb-2">
+                拖拽文件到此处或点击上传
+              </p>
+              <p className="text-sm text-gray-600">
+                支持 {acceptedTypes.join(', ')} 文件，最大 {formatFileSize(maxFileSize)}
+              </p>
+            </div>
           </div>
         )}
 
         {/* 文件信息 */}
         {fileName && uploadStatus === 'idle' && (
-          <div className="text-left">
-            <p className="font-medium text-gray-900 mb-1">{fileName}</p>
-            {fileInfo && (
-              <div className="flex gap-4 text-sm text-gray-600">
-                <span>大小: {fileInfo.size}</span>
-                <span>类型: {fileInfo.type}</span>
+          <div className="text-left space-y-4">
+            <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-lg">
+              <FileText className="w-8 h-8 text-blue-600" />
+              <div className="flex-1">
+                <p className="font-medium text-gray-900">{fileName}</p>
+                {fileInfo && (
+                  <div className="flex gap-4 text-sm text-gray-600">
+                    <span>大小: {fileInfo.size}</span>
+                    <span>类型: {fileInfo.type}</span>
+                  </div>
+                )}
               </div>
-            )}
+            </div>
+            
             <button
               onClick={(e) => {
                 e.stopPropagation()
                 handleUpload(fileInputRef.current?.files?.[0])
               }}
               disabled={isUploadDisabled}
-              className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center justify-center gap-2"
             >
+              <Upload className="w-5 h-5" />
               开始上传
             </button>
           </div>
@@ -324,25 +339,43 @@ const FileUpload: React.FC<FileUploadProps> = ({
 
         {/* 上传进度 */}
         {uploadStatus === 'uploading' && uploadProgress && (
-          <div className="text-left">
-            <p className="font-medium text-gray-900 mb-2">正在上传 {fileName}</p>
-            <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
-              <div
-                className="bg-blue-500 h-2 rounded-full transition-all duration-200"
-                style={{ width: `${uploadProgress.percentage}%` }}
-              />
+          <div className="text-left space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+              <p className="font-medium text-gray-900">正在上传 {fileName}</p>
             </div>
-            <div className="flex justify-between text-sm text-gray-600">
-              <span>{formatFileSize(uploadProgress.loaded)} / {formatFileSize(uploadProgress.total)}</span>
-              <span>{uploadProgress.percentage}%</span>
+            
+            {/* 美化的进度条 */}
+            <div className="space-y-2">
+              <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                <div
+                  className="bg-gradient-to-r from-blue-500 to-purple-500 h-3 rounded-full transition-all duration-300 ease-out shadow-lg"
+                  style={{ width: `${uploadProgress.percentage}%` }}
+                >
+                  <div className="h-full bg-white/20 animate-pulse"></div>
+                </div>
+              </div>
+              
+              {/* 进度信息 */}
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-gray-600 font-medium">
+                  {formatFileSize(uploadProgress.loaded)} / {formatFileSize(uploadProgress.total)}
+                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-blue-600 font-bold">{uploadProgress.percentage}%</span>
+                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                </div>
+              </div>
             </div>
+            
             <button
               onClick={(e) => {
                 e.stopPropagation()
                 handleCancel()
               }}
-              className="mt-3 px-3 py-1 text-sm text-red-600 border border-red-600 rounded hover:bg-red-50"
+              className="px-4 py-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors duration-200 flex items-center gap-2"
             >
+              <X className="w-4 h-4" />
               取消上传
             </button>
           </div>
@@ -350,16 +383,22 @@ const FileUpload: React.FC<FileUploadProps> = ({
 
         {/* 成功状态 */}
         {uploadStatus === 'success' && (
-          <div>
-            <p className="font-medium text-green-800 mb-2">文件上传成功！</p>
-            <p className="text-sm text-green-600">{fileName}</p>
+          <div className="space-y-4">
+            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto">
+              <CheckCircle className="w-8 h-8 text-green-600" />
+            </div>
+            <div>
+              <p className="font-medium text-green-800 mb-2">文件上传成功！</p>
+              <p className="text-sm text-green-600">{fileName}</p>
+            </div>
             <button
               onClick={(e) => {
                 e.stopPropagation()
                 handleReset()
               }}
-              className="mt-3 px-4 py-2 text-blue-600 border border-blue-600 rounded hover:bg-blue-50"
+              className="px-6 py-3 bg-gradient-to-r from-green-600 to-blue-600 text-white rounded-lg hover:from-green-700 hover:to-blue-700 shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center justify-center gap-2"
             >
+              <Upload className="w-5 h-5" />
               上传新文件
             </button>
           </div>
@@ -367,17 +406,22 @@ const FileUpload: React.FC<FileUploadProps> = ({
 
         {/* 错误状态 */}
         {uploadStatus === 'error' && (
-          <div>
-            <p className="font-medium text-red-800 mb-2">上传失败</p>
-            <p className="text-sm text-red-600 mb-3">{errorMessage}</p>
-            <div className="flex gap-2 justify-center">
+          <div className="space-y-4">
+            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto">
+              <AlertCircle className="w-8 h-8 text-red-600" />
+            </div>
+            <div>
+              <p className="font-medium text-red-800 mb-2">上传失败</p>
+              <p className="text-sm text-red-600">{errorMessage}</p>
+            </div>
+            <div className="flex gap-3 justify-center">
               <button
                 onClick={(e) => {
                   e.stopPropagation()
                   handleRetry()
                 }}
                 disabled={isUploading}
-                className="px-3 py-1 text-blue-600 border border-blue-600 rounded hover:bg-blue-50 disabled:opacity-50 flex items-center gap-1"
+                className="px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 flex items-center gap-2 shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200"
               >
                 <RefreshCw className="w-4 h-4" />
                 重试 ({retryCount})
@@ -387,8 +431,9 @@ const FileUpload: React.FC<FileUploadProps> = ({
                   e.stopPropagation()
                   handleReset()
                 }}
-                className="px-3 py-1 text-gray-600 border border-gray-600 rounded hover:bg-gray-50"
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors duration-200 flex items-center gap-2"
               >
+                <X className="w-4 h-4" />
                 重新选择
               </button>
             </div>

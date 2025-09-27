@@ -17,6 +17,7 @@ interface ChartTypeSelectorProps {
   onTypeSelect?: (type: string) => void
   multiSelect?: boolean
   disabled?: boolean
+  loading?: boolean
   showPreviews?: boolean
 }
 
@@ -27,6 +28,7 @@ const ChartTypeSelector: React.FC<ChartTypeSelectorProps> = ({
   onTypeSelect,
   multiSelect = false,
   disabled = false,
+  loading = false,
   showPreviews = true
 }) => {
   const [hoveredType, setHoveredType] = useState<string | null>(null)
@@ -106,7 +108,7 @@ const ChartTypeSelector: React.FC<ChartTypeSelectorProps> = ({
 
   // 处理图表类型选择
   const handleTypeSelect = useCallback((type: string) => {
-    if (disabled) return
+    if (disabled || loading) return
 
     if (multiSelect) {
       const newSelection = selectedTypes.includes(type)
@@ -186,7 +188,7 @@ const ChartTypeSelector: React.FC<ChartTypeSelectorProps> = ({
                       ? 'border-blue-500 bg-blue-50 shadow-md'
                       : 'border-gray-200 hover:border-gray-300 hover:shadow-md hover:bg-gray-50'
                     }
-                    ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
+                    ${disabled || loading ? 'opacity-50 cursor-not-allowed' : ''}
                   `}
                   onClick={() => handleTypeSelect(chartType.type)}
                   onMouseEnter={() => handleMouseEnter(chartType.type)}
@@ -248,7 +250,7 @@ const ChartTypeSelector: React.FC<ChartTypeSelectorProps> = ({
                   ? 'border-blue-500 bg-blue-50'
                   : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
                 }
-                ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
+                ${disabled || loading ? 'opacity-50 cursor-not-allowed' : ''}
               `}
               onClick={() => handleTypeSelect(chartType.type)}
               onMouseEnter={() => handleMouseEnter(chartType.type)}
@@ -333,10 +335,10 @@ const ChartTypeSelector: React.FC<ChartTypeSelectorProps> = ({
       )}
 
       {/* 禁用状态提示 */}
-      {disabled && (
+      {(disabled || loading) && (
         <div className="mt-6 p-4 bg-gray-100 rounded-lg border border-gray-300">
           <p className="text-sm text-gray-600">
-            图表类型选择已禁用，请先完成前置步骤
+            {loading ? '正在生成图表，请稍候...' : '图表类型选择已禁用，请先完成前置步骤'}
           </p>
         </div>
       )}

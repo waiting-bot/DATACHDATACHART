@@ -241,6 +241,7 @@ export interface HeaderProps {
   onLogoClick?: () => void
   showStatus?: boolean
   className?: string
+  extraActions?: React.ReactNode
 }
 
 export interface StatusBarProps {

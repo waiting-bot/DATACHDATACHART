@@ -257,7 +257,7 @@ async def generate_chart(
             # 直接从数据生成图表
             chart_result = chart_generator.generate_chart(
                 data=request.chart_data,
-                chart_type=request.chart_type.value if request.chart_type else 'bar',
+                chart_type=request.chart_type.value if hasattr(request.chart_type, 'value') else request.chart_type or 'bar',
                 title=request.chart_title or "数据图表",
                 width=request.width or 800,
                 height=request.height or 600,
@@ -286,7 +286,16 @@ async def generate_chart(
         raise
     except Exception as e:
         logger.error(f"图表生成失败: {e}")
-        raise HTTPException(status_code=500, detail=f"图表生成失败: {str(e)}")
+        logger.error(f"请求参数: chart_type={request.chart_type}, chart_title={request.chart_title}")
+        # 返回用户友好的错误信息
+        if "chart_type" in str(e).lower():
+            raise HTTPException(status_code=400, detail="不支持的图表类型，请选择其他图表类型")
+        elif "access_code" in str(e).lower():
+            raise HTTPException(status_code=400, detail="访问码验证失败，请检查访问码是否正确")
+        elif "file" in str(e).lower():
+            raise HTTPException(status_code=400, detail="文件处理失败，请重新上传文件")
+        else:
+            raise HTTPException(status_code=500, detail="图表生成失败，请稍后重试")
 
 # === 预览图生成API ===
 
@@ -358,14 +367,18 @@ async def generate_selected_charts(
                 format=request.format or 'png'
             )
             
+            if not chart_result.get('success'):
+                logger.warning(f"图表生成失败 {chart_type}: {chart_result.get('message')}")
+                continue
+            
             chart_info = GeneratedChartInfo(
                 chart_type=chart_type,
                 chart_name=chart_generator.get_chart_name(chart_type),
-                chart_data=chart_result['image_data'],
+                chart_data=chart_result.get('image_data', ''),
                 width=request.width or 800,
                 height=request.height or 600,
                 format=request.format or 'png',
-                file_size=len(chart_result['image_data']) if 'image_data' in chart_result else None
+                file_size=len(chart_result.get('image_data', ''))
             )
             charts.append(chart_info)
         

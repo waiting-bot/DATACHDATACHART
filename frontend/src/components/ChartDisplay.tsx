@@ -69,7 +69,7 @@ const ChartDisplay: React.FC<ChartDisplayProps> = ({
       
       // 下载图片
       const link = document.createElement('a')
-      link.href = `data:${chart.format === 'svg' ? 'image/svg+xml' : 'image/png'};base64,${chart.chart_data}`
+      link.href = chart.chart_data
       link.download = `${chart.chart_name}.${chart.format}`
       document.body.appendChild(link)
       link.click()
@@ -87,7 +87,7 @@ const ChartDisplay: React.FC<ChartDisplayProps> = ({
   // 复制图片到剪贴板
   const handleCopyImage = useCallback(async (chart: ChartData) => {
     try {
-      const response = await fetch(`data:${chart.format === 'svg' ? 'image/svg+xml' : 'image/png'};base64,${chart.chart_data}`)
+      const response = await fetch(chart.chart_data)
       const blob = await response.blob()
       
       await navigator.clipboard.write([
@@ -271,7 +271,7 @@ const ChartDisplay: React.FC<ChartDisplayProps> = ({
           >
             {selectedChart && (
               <img
-                src={`data:${selectedChart.format === 'svg' ? 'image/svg+xml' : 'image/png'};base64,${selectedChart.chart_data}`}
+                src={selectedChart.chart_data}
                 alt={selectedChart.chart_name}
                 className="w-full h-auto"
                 style={{ 

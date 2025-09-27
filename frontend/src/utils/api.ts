@@ -143,7 +143,7 @@ export class ApiClient {
 
   // 访问码相关 API
   async validateAccessCode(accessCode: string): Promise<StandardResponse> {
-    return this.post('/validate-access-code', { access_code: accessCode })
+    return this.post('/access-codes/validate', { access_code: accessCode })
   }
 
   async getAccessCodeUsage(accessCode: string): Promise<StandardResponse> {
@@ -157,7 +157,7 @@ export class ApiClient {
 
   // 图表生成相关 API
   async generatePreviews(filePath: string, chartTypes: string[]): Promise<StandardResponse> {
-    return this.post('/generate-previews', {
+    return this.post('/charts/previews/generate', {
       file_path: filePath,
       chart_types: chartTypes,
       width: 400,
@@ -170,7 +170,7 @@ export class ApiClient {
     selectedChartTypes: string[], 
     accessCode: string
   ): Promise<StandardResponse> {
-    return this.post('/generate-selected-charts', {
+    return this.post('/charts/previews/selected-generate', {
       file_path: filePath,
       selected_chart_types: selectedChartTypes,
       access_code: accessCode,
@@ -194,11 +194,11 @@ export class ApiClient {
 
   // 图表类型相关 API
   async getChartTypes(): Promise<StandardResponse> {
-    return this.get('/chart-types')
+    return this.get('/charts/types')
   }
 
   async getChartSuggestions(filePath: string): Promise<StandardResponse> {
-    return this.post('/chart-suggestions', { file_path: filePath })
+    return this.post('/charts/suggestions', { file_path: filePath })
   }
 
   // 系统健康检查
