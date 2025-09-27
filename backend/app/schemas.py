@@ -233,6 +233,57 @@ class SelectedChartsGenerationResponse(BaseModel):
     charts: List[GeneratedChartInfo]
     remaining_usage: Optional[int] = None
 
+# 增强的图表配置相关模型
+class ChartConfigRequest(BaseModel):
+    """图表配置请求模型"""
+    title: Optional[str] = Field("数据图表", description="图表标题")
+    color_scheme: Optional[str] = Field("business_blue_gray", description="配色方案")
+    resolution: Optional[str] = Field("300dpi", description="分辨率")
+    show_axis_labels: Optional[bool] = Field(True, description="显示轴标签")
+    output_format: Optional[str] = Field("png", description="输出格式")
+    width: Optional[int] = Field(800, description="图表宽度")
+    height: Optional[int] = Field(600, description="图表高度")
+
+class ChartConfigResponse(BaseModel):
+    """图表配置响应模型"""
+    success: bool
+    message: str
+    config: ChartConfigRequest
+    available_options: Optional[Dict[str, List[str]]] = None
+
+class ColorSchemeInfo(BaseModel):
+    """配色方案信息模型"""
+    name: str
+    value: str
+    description: str
+    preview_colors: List[str]
+
+class AvailableColorSchemesResponse(BaseModel):
+    """可用配色方案响应模型"""
+    schemes: List[ColorSchemeInfo]
+
+class ChartTemplateRequest(BaseModel):
+    """图表模板请求模型"""
+    name: str = Field(..., description="模板名称")
+    chart_type: ChartType = Field(..., description="图表类型")
+    config: ChartConfigRequest = Field(..., description="图表配置")
+    description: Optional[str] = Field(None, description="模板描述")
+    is_public: Optional[bool] = Field(False, description="是否公开")
+
+class ChartTemplateResponse(BaseModel):
+    """图表模板响应模型"""
+    id: int
+    name: str
+    chart_type: ChartType
+    config: ChartConfigRequest
+    description: Optional[str]
+    is_public: bool
+    created_at: datetime
+    usage_count: int
+    
+    class Config:
+        from_attributes = True
+
 # 系统配置相关模型
 class SystemConfigRequest(BaseModel):
     """系统配置请求模型"""

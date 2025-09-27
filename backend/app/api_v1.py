@@ -46,7 +46,10 @@ async def api_info():
             "health": "/api/v1/health",
             "validate_access_code": "/api/v1/access-codes/validate",
             "generate_chart": "/api/v1/charts/generate",
-            "chart_types": "/api/v1/charts/types"
+            "chart_types": "/api/v1/charts/types",
+            "config_options": "/api/v1/charts/config/options",
+            "config_validate": "/api/v1/charts/config/validate",
+            "chart_templates": "/api/v1/charts/templates"
         },
         "supported_file_formats": [".xlsx", ".xls"],
         "supported_chart_types": ["bar", "line", "pie", "scatter", "area", "heatmap", "box", "violin", "histogram"]
@@ -401,3 +404,219 @@ async def generate_selected_charts(
     except Exception as e:
         logger.error(f"选中图表生成失败: {e}")
         raise HTTPException(status_code=500, detail=f"选中图表生成失败: {str(e)}")
+
+# === 图表配置API ===
+
+@router.get("/charts/config/options", response_model=StandardResponse)
+async def get_chart_config_options():
+    """获取图表配置选项"""
+    try:
+        options = {
+            "color_schemes": [
+                {"value": "business_blue_gray", "name": "商务蓝灰", "description": "专业商务配色，适合正式汇报"},
+                {"value": "professional_black_gray", "name": "专业黑灰", "description": "经典黑白配色，适合各类场合"},
+                {"value": "modern_blue", "name": "现代蓝色", "description": "清新现代蓝色，适合创新展示"},
+                {"value": "elegant_purple", "name": "优雅紫色", "description": "高雅紫色渐变，适合高端展示"}
+            ],
+            "resolutions": [
+                {"value": "150dpi", "name": "标准 (150dpi)", "description": "适合屏幕显示"},
+                {"value": "300dpi", "name": "高清 (300dpi)", "description": "适合打印和高清展示"}
+            ],
+            "output_formats": [
+                {"value": "png", "name": "PNG", "description": "透明背景，适合网页和PPT"},
+                {"value": "svg", "name": "SVG", "description": "矢量格式，无损缩放"},
+                {"value": "jpg", "name": "JPG", "description": "压缩格式，文件较小"}
+            ],
+            "chart_types": [
+                {"value": "bar", "name": "柱状图", "description": "比较不同类别的数据"},
+                {"value": "line", "name": "折线图", "description": "显示数据变化趋势"},
+                {"value": "pie", "name": "饼图", "description": "显示比例关系"},
+                {"value": "area", "name": "面积图", "description": "显示累积变化"},
+                {"value": "scatter", "name": "散点图", "description": "显示数据分布"},
+                {"value": "radar", "name": "雷达图", "description": "多维度数据对比"}
+            ]
+        }
+        
+        return create_success_response(options)
+    except Exception as e:
+        logger.error(f"获取配置选项失败: {e}")
+        raise HTTPException(status_code=500, detail="获取配置选项失败")
+
+@router.post("/charts/config/validate", response_model=StandardResponse)
+async def validate_chart_config(
+    config: ChartConfigRequest
+):
+    """验证图表配置"""
+    try:
+        # 验证配置参数
+        validation_errors = []
+        
+        if config.width and (config.width < 200 or config.width > 2000):
+            validation_errors.append("图表宽度应在200-2000像素之间")
+        
+        if config.height and (config.height < 200 or config.height > 2000):
+            validation_errors.append("图表高度应在200-2000像素之间")
+        
+        if config.title and len(config.title) > 100:
+            validation_errors.append("图表标题长度不能超过100字符")
+        
+        if validation_errors:
+            return {
+                "success": False,
+                "data": None,
+                "error": {
+                    "code": "VALIDATION_ERROR",
+                    "message": "; ".join(validation_errors)
+                }
+            }
+        
+        # 验证通过，返回配置建议
+        suggestions = []
+        if config.color_scheme == "business_blue_gray":
+            suggestions.append("商务蓝灰配色非常适合企业报表")
+        
+        if config.resolution == "300dpi":
+            suggestions.append("300dpi分辨率适合打印使用")
+        
+        return create_success_response({
+            "valid": True,
+            "suggestions": suggestions,
+            "optimized_config": config.dict()
+        })
+    except Exception as e:
+        logger.error(f"验证图表配置失败: {e}")
+        raise HTTPException(status_code=500, detail="图表配置验证失败")
+
+@router.post("/charts/config/preview", response_model=StandardResponse)
+async def generate_config_preview(
+    request: dict
+):
+    """生成配置预览图（不消耗访问码）"""
+    try:
+        # 这里应该生成一个预览图
+        # 目前返回模拟数据
+        preview_data = {
+            "preview_url": "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAwIiBoZWlnaHQ9IjMwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iNDAwIiBoZWlnaHQ9IjMwMCIgZmlsbD0iI2YwZjBmMCIvPjx0ZXh0IHg9IjIwMCIgeT0iMTUwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTYiIGZpbGw9IiM2NjYiPuWVhuWTgeWbvueJhzwvdGV4dD48L3N2Zz4=",
+            "config_applied": request.get("config", {}),
+            "estimated_file_size": "150KB",
+            "generation_time": "1-2秒"
+        }
+        
+        return create_success_response(preview_data)
+    except Exception as e:
+        logger.error(f"生成配置预览失败: {e}")
+        raise HTTPException(status_code=500, detail="配置预览生成失败")
+
+# === 图表模板API ===
+
+@router.get("/charts/templates", response_model=StandardResponse)
+async def get_chart_templates(
+    chart_type: Optional[ChartType] = None,
+    is_public: Optional[bool] = None,
+    db: Session = Depends(get_db)
+):
+    """获取图表模板列表"""
+    try:
+        # 这里应该从数据库获取模板
+        # 目前返回示例模板
+        templates = [
+            {
+                "id": 1,
+                "name": "月度销售报告",
+                "chart_type": "bar",
+                "config": {
+                    "title": "月度销售报告",
+                    "color_scheme": "business_blue_gray",
+                    "resolution": "300dpi",
+                    "show_axis_labels": True,
+                    "output_format": "png"
+                },
+                "description": "适用于月度销售数据展示",
+                "is_public": True,
+                "usage_count": 156,
+                "created_at": "2024-01-15T10:30:00Z"
+            },
+            {
+                "id": 2,
+                "name": "项目进度追踪",
+                "chart_type": "line",
+                "config": {
+                    "title": "项目进度追踪",
+                    "color_scheme": "modern_blue",
+                    "resolution": "300dpi",
+                    "show_axis_labels": True,
+                    "output_format": "png"
+                },
+                "description": "适用于项目管理进度展示",
+                "is_public": True,
+                "usage_count": 89,
+                "created_at": "2024-01-20T14:20:00Z"
+            }
+        ]
+        
+        # 过滤模板
+        if chart_type:
+            templates = [t for t in templates if t["chart_type"] == chart_type]
+        if is_public is not None:
+            templates = [t for t in templates if t["is_public"] == is_public]
+        
+        return create_success_response(templates)
+    except Exception as e:
+        logger.error(f"获取图表模板失败: {e}")
+        raise HTTPException(status_code=500, detail="获取图表模板失败")
+
+@router.post("/charts/templates", response_model=StandardResponse)
+async def create_chart_template(
+    template: ChartTemplateRequest,
+    db: Session = Depends(get_db)
+):
+    """创建图表模板"""
+    try:
+        # 这里应该保存到数据库
+        # 目前返回模拟响应
+        created_template = {
+            "id": 3,
+            "name": template.name,
+            "chart_type": template.chart_type,
+            "config": template.config,
+            "description": template.description,
+            "is_public": template.is_public,
+            "usage_count": 0,
+            "created_at": "2024-01-25T16:45:00Z"
+        }
+        
+        return create_success_response(created_template)
+    except Exception as e:
+        logger.error(f"创建图表模板失败: {e}")
+        raise HTTPException(status_code=500, detail="创建图表模板失败")
+
+@router.get("/charts/templates/{template_id}", response_model=StandardResponse)
+async def get_chart_template(
+    template_id: int,
+    db: Session = Depends(get_db)
+):
+    """获取图表模板详情"""
+    try:
+        # 这里应该从数据库获取
+        # 目前返回示例数据
+        template = {
+            "id": template_id,
+            "name": "月度销售报告",
+            "chart_type": "bar",
+            "config": {
+                "title": "月度销售报告",
+                "color_scheme": "business_blue_gray",
+                "resolution": "300dpi",
+                "show_axis_labels": True,
+                "output_format": "png"
+            },
+            "description": "适用于月度销售数据展示",
+            "is_public": True,
+            "usage_count": 156,
+            "created_at": "2024-01-15T10:30:00Z"
+        }
+        
+        return create_success_response(template)
+    except Exception as e:
+        logger.error(f"获取图表模板详情失败: {e}")
+        raise HTTPException(status_code=500, detail="获取图表模板详情失败")
