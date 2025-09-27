@@ -21,6 +21,15 @@ const SimpleApp: React.FC = () => {
   const [uploadProgress, setUploadProgress] = useState(0)
   const [isMobile, setIsMobile] = useState(false)
   const [imageZoom, setImageZoom] = useState<Record<string, number>>({})
+  
+  // 访问码验证状态管理
+  const [accessCodeInfo, setAccessCodeInfo] = useState<{
+    isValid: boolean
+    remainingUsage?: number
+    maxUsage?: number
+    message?: string
+  } | null>(null)
+  const [isValidating, setIsValidating] = useState(false)
 
   // 检测移动设备
   useEffect(() => {
@@ -98,6 +107,61 @@ const SimpleApp: React.FC = () => {
   useEffect(() => {
     // 应用初始化
   }, [])
+
+  // 实时访问码验证
+  const validateAccessCode = useCallback(async (code: string) => {
+    if (code.length !== 6) {
+      setAccessCodeInfo(null)
+      return
+    }
+
+    setIsValidating(true)
+    try {
+      const response = await fetch('http://localhost:8000/api/v1/access-codes/validate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ access_code: code }),
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        setAccessCodeInfo({
+          isValid: true,
+          remainingUsage: result.data.remaining_usage,
+          maxUsage: result.data.max_usage,
+          message: '验证成功'
+        })
+      } else {
+        setAccessCodeInfo({
+          isValid: false,
+          message: result.error?.message || '访问码无效'
+        })
+      }
+    } catch (err) {
+      setAccessCodeInfo({
+        isValid: false,
+        message: '网络错误，请检查连接'
+      })
+    } finally {
+      setIsValidating(false)
+    }
+  }, [])
+
+  // 防抖验证
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (accessCode.length === 6) {
+        validateAccessCode(accessCode)
+      } else {
+        setAccessCodeInfo(null)
+      }
+    }, 500)
+
+    return () => clearTimeout(timer)
+  }, [accessCode, validateAccessCode])
 
   const handleValidateCode = useCallback(async () => {
     if (!accessCode.trim()) {
@@ -415,7 +479,7 @@ const SimpleApp: React.FC = () => {
                       setError('')
                     }}
                     placeholder="6位数字访问码"
-                    className={`professional-input access-code-input ${isMobile ? 'text-2xl py-4' : ''}`}
+                    className={`professional-input access-code-input ${isMobile ? 'text-2xl py-4' : ''} ${accessCodeInfo ? (accessCodeInfo.isValid ? 'border-green-500 focus:border-green-600' : 'border-red-500 focus:border-red-600') : ''}`}
                     disabled={isLoading}
                     maxLength={6}
                     inputMode="numeric"
@@ -431,11 +495,25 @@ const SimpleApp: React.FC = () => {
                     <span className="text-xs text-gray-400">
                       {accessCode.length}/6 位数字
                     </span>
-                    {accessCode.length === 6 && !error && (
-                      <span className="flex items-center text-xs text-green-600">
-                        <span className="status-indicator success"></span>
-                        格式正确
-                      </span>
+                    {accessCode.length === 6 && (
+                      <>
+                        {isValidating ? (
+                          <span className="flex items-center text-xs text-blue-600">
+                            <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse mr-1"></div>
+                            验证中...
+                          </span>
+                        ) : accessCodeInfo ? (
+                          <span className={`flex items-center text-xs ${accessCodeInfo.isValid ? 'text-green-600' : 'text-red-600'}`}>
+                            <div className={`w-1.5 h-1.5 rounded-full mr-1 ${accessCodeInfo.isValid ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                            {accessCodeInfo.isValid ? '验证成功' : '验证失败'}
+                          </span>
+                        ) : (
+                          <span className="flex items-center text-xs text-green-600">
+                            <span className="status-indicator success"></span>
+                            格式正确
+                          </span>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
@@ -471,11 +549,50 @@ const SimpleApp: React.FC = () => {
                   )}
                 </button>
 
-                {/* 底部帮助 */}
+                {/* 底部帮助和信息 */}
                 <div className="text-center">
-                  <p className="text-xs text-gray-400">
-                    访问码过期？联系管理员重置
-                  </p>
+                  {/* 实时验证状态显示 */}
+                  {accessCodeInfo && (
+                    <div className={`mb-3 p-3 rounded-lg border ${accessCodeInfo.isValid ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                      {accessCodeInfo.isValid ? (
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                          <span className="text-sm font-medium text-green-800">
+                            剩余次数 <span className="font-bold">{accessCodeInfo.remainingUsage}</span> 次
+                          </span>
+                          {accessCodeInfo.remainingUsage !== undefined && accessCodeInfo.remainingUsage <= 5 && (
+                            <span className="text-xs text-orange-600 bg-orange-100 px-2 py-1 rounded ml-2">
+                              即将用完
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                          <span className="text-sm text-red-700">
+                            {accessCodeInfo.message}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
+                  {/* 验证中状态 */}
+                  {isValidating && (
+                    <div className="mb-3 p-3 rounded-lg border border-blue-200 bg-blue-50">
+                      <div className="flex items-center justify-center gap-2">
+                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                        <span className="text-sm text-blue-700">验证中...</span>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* 默认帮助信息 */}
+                  {!accessCodeInfo && !isValidating && (
+                    <p className="text-xs text-gray-400">
+                      访问码过期？联系管理员重置
+                    </p>
+                  )}
                   <p className="text-xs text-gray-300 mt-1">
                     小红书 @准点办公室
                   </p>
