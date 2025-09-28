@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
+import { Chart } from 'chart.js/auto'
 
 const SimpleApp: React.FC = () => {
   const [currentStep, setCurrentStep] = useState('access_code')
@@ -30,6 +31,233 @@ const SimpleApp: React.FC = () => {
     message?: string
   } | null>(null)
   const [isValidating, setIsValidating] = useState(false)
+  
+  // Excel解析数据状态
+  const [excelParsedData, setExcelParsedData] = useState<Record<string, unknown> | null>(null)
+  const [isParsingExcel, setIsParsingExcel] = useState(false)
+  const [parsingError, setParsingError] = useState<string | null>(null)
+  const [chartPreviewError, setChartPreviewError] = useState<string | null>(null)
+  
+  // 数据系列选择状态管理
+  const [dataSeries, setDataSeries] = useState({
+    xAxis: 'month',
+    yAxis: 'sales'
+  })
+  
+  // Excel数据解析函数 - 增强错误处理
+  const parseExcelData = useCallback(async (filePath: string) => {
+    if (!filePath) {
+      console.warn('Excel文件路径为空，跳过解析')
+      return null
+    }
+    
+    setIsParsingExcel(true)
+    setParsingError(null)
+    
+    try {
+      const response = await fetch('http://localhost:8000/api/v1/files/parse-excel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_path: filePath, chart_type: 'bar' }),
+      })
+      
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`)
+      }
+      
+      const result = await response.json()
+      
+      if (!result.success || !result.data) {
+        throw new Error(result.error?.message || 'Excel数据解析失败')
+      }
+      
+      const data = result.data
+      
+      // 数据格式验证
+      if (!data.chart_data || !data.chart_data.raw_data) {
+        throw new Error('Excel数据格式不正确，缺少必要的数据字段')
+      }
+      
+      setExcelParsedData(data)
+      
+      // 智能设置默认的数据系列选择
+      if (data.chart_data && data.chart_data.raw_data) {
+        const rawData = data.chart_data.raw_data
+        if (rawData.data_types && rawData.columns) {
+          const dataTypes = rawData.data_types as Record<string, string>
+          const columns = rawData.columns as string[]
+          
+          // 寻找第一个分类列作为X轴
+          const categoricalColumn = columns.find(col => 
+            dataTypes[col] === 'string' || dataTypes[col] === 'category'
+          ) || columns[0]
+          
+          // 寻找第一个数值列作为Y轴
+          const numericColumn = columns.find(col => dataTypes[col] === 'numeric') || columns[1]
+          
+          setDataSeries({
+            xAxis: categoricalColumn,
+            yAxis: numericColumn
+          })
+          
+          // 智能设置图表类型选择
+          const numericColumns = columns.filter(col => dataTypes[col] === 'numeric')
+          const categoricalColumns = columns.filter(col => 
+            dataTypes[col] === 'string' || dataTypes[col] === 'category'
+          )
+          
+          const recommendations = []
+          if (categoricalColumns.length >= 1 && numericColumns.length >= 1) {
+            recommendations.push('bar', 'line')
+            if (numericColumns.length === 1) {
+              recommendations.push('pie')
+            }
+          }
+          if (numericColumns.length >= 2) {
+            recommendations.push('scatter', 'area')
+          }
+          
+          const uniqueRecommendations = [...new Set(recommendations)]
+          if (uniqueRecommendations.length > 0) {
+            setSelectedChartTypes(uniqueRecommendations.slice(0, 2))
+          }
+        }
+      }
+      
+      return data
+    } catch (error) {
+      console.error('Excel数据解析失败:', error)
+      const errorMessage = error instanceof Error ? error.message : 'Excel数据解析失败'
+      setParsingError(errorMessage)
+      
+      // 静默失败，不影响用户流程，但记录错误
+      setTimeout(() => {
+        setParsingError(null)
+      }, 5000)
+      
+      return null
+    } finally {
+      setIsParsingExcel(false)
+    }
+  }, [])
+  
+  // 根据Excel数据智能推断数据系列选项 - 增强错误处理
+  const getDataSeriesOptions = useCallback(() => {
+    try {
+      if (!excelParsedData || !excelParsedData.chart_data) {
+        return {
+          xAxis: ['month', 'department', 'product', 'region'],
+          yAxis: ['sales', 'growth', 'quantity', 'profit']
+        }
+      }
+      
+      const chartData = excelParsedData.chart_data as any
+      const rawData = chartData.raw_data
+      
+      if (!rawData || !rawData.data_types || !rawData.columns) {
+        return {
+          xAxis: ['month', 'department', 'product', 'region'],
+          yAxis: ['sales', 'growth', 'quantity', 'profit']
+        }
+      }
+    
+    const dataTypes = rawData.data_types as Record<string, string>
+    const columns = rawData.columns as string[]
+    
+    // 分析数据列，推断合适的X轴和Y轴选项
+    const xAxisOptions: string[] = []
+    const yAxisOptions: string[] = []
+    
+    columns.forEach(column => {
+      const dataType = dataTypes[column]
+      if (dataType === 'string' || dataType === 'category') {
+        xAxisOptions.push(column)
+      } else if (dataType === 'numeric') {
+        yAxisOptions.push(column)
+      }
+    })
+    
+    // 如果没有推断出合适的选项，使用默认选项
+    return {
+      xAxis: xAxisOptions.length > 0 ? xAxisOptions : ['month', 'department', 'product', 'region'],
+      yAxis: yAxisOptions.length > 0 ? yAxisOptions : ['sales', 'growth', 'quantity', 'profit']
+    }
+    } catch (error) {
+      console.error('获取数据系列选项失败:', error)
+      // 返回默认选项
+      return {
+        xAxis: ['month', 'department', 'product', 'region'],
+        yAxis: ['sales', 'growth', 'quantity', 'profit']
+      }
+    }
+  }, [excelParsedData])
+  
+  // 获取用于图表预览的数据
+  const getPreviewData = useCallback(() => {
+    if (!excelParsedData || !excelParsedData.chart_data) {
+      // 使用默认mock数据
+      return {
+        month: ['1月', '2月', '3月', '4月', '5月', '6月'],
+        department: ['销售', '市场', '技术', '运营'],
+        product: ['产品A', '产品B', '产品C', '产品D'],
+        region: ['华北', '华东', '华南', '西部'],
+        sales: [120, 190, 300, 240, 280, 320],
+        growth: [5, 8, 12, 7, 9, 15],
+        quantity: [1200, 1900, 3000, 2400, 2800, 3200],
+        profit: [12, 19, 30, 24, 28, 32]
+      }
+    }
+    
+    // 使用真实的Excel数据 - 转换API响应格式为预览需要的格式
+    const chartData = excelParsedData.chart_data as any
+    const rawData = chartData.raw_data
+    if (!rawData || !rawData.columns || !rawData.data) {
+      // 如果数据格式不符合预期，返回默认数据
+      return {
+        month: ['1月', '2月', '3月', '4月', '5月', '6月'],
+        sales: [120, 190, 300, 240, 280, 320]
+      }
+    }
+    
+    // 将行列式数据转换为列式数据
+    const columnData: Record<string, any[]> = {}
+    const { columns, data } = rawData
+    
+    // 初始化每一列的数组
+    columns.forEach((col: string) => {
+      columnData[col] = []
+    })
+    
+    // 填充数据
+    data.forEach((row: any[]) => {
+      row.forEach((value: any, index: number) => {
+        if (columns[index]) {
+          columnData[columns[index]].push(value)
+        }
+      })
+    })
+    
+    return columnData
+  }, [excelParsedData])
+  
+  // 图表预览引用 - 支持多图表
+  const chartRefs = useRef<Record<string, any>>({})
+  const canvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({})
+  const [activePreviewIndex, setActivePreviewIndex] = useState(0)
+
+  // 获取图表类型中文名称
+  const getChartTypeName = (chartType: string): string => {
+    const typeNames: Record<string, string> = {
+      'bar': '柱状图',
+      'line': '折线图', 
+      'pie': '饼图',
+      'area': '面积图',
+      'scatter': '散点图',
+      'doughnut': '环形图'
+    }
+    return typeNames[chartType] || chartType
+  }
 
   // 检测移动设备
   useEffect(() => {
@@ -107,6 +335,118 @@ const SimpleApp: React.FC = () => {
   useEffect(() => {
     // 应用初始化
   }, [])
+
+  // 图表实时预览 - 支持多图表
+  useEffect(() => {
+    if (currentStep !== 'chart_generation' || selectedChartTypes.length === 0) return
+
+    // 使用真实Excel数据，如果没有则使用默认数据
+    const previewData = getPreviewData()
+
+    // 配色映射
+    const colorSchemes = {
+      business_blue_gray: {
+        background: 'rgba(59, 130, 246, 0.6)',
+        border: 'rgba(59, 130, 246, 1)'
+      },
+      professional_black_gray: {
+        background: 'rgba(75, 85, 99, 0.6)',
+        border: 'rgba(75, 85, 99, 1)'
+      },
+      modern_blue: {
+        background: 'rgba(37, 99, 235, 0.6)',
+        border: 'rgba(37, 99, 235, 1)'
+      },
+      elegant_purple: {
+        background: 'rgba(147, 51, 234, 0.6)',
+        border: 'rgba(147, 51, 234, 1)'
+      }
+    }
+
+    // 销毁所有现有图表
+    Object.keys(chartRefs.current).forEach(chartKey => {
+      if (chartRefs.current[chartKey]) {
+        chartRefs.current[chartKey].destroy()
+        delete chartRefs.current[chartKey]
+      }
+    })
+
+    // 为每个选中的图表类型创建图表实例
+    selectedChartTypes.forEach((chartType) => {
+      const canvasId = `chart-canvas-${chartType}`
+      const canvas = canvasRefs.current[canvasId]
+      
+      if (canvas) {
+        const ctx = canvas.getContext('2d')
+        if (ctx) {
+          try {
+            const colors = colorSchemes[chartConfig.colorScheme as keyof typeof colorSchemes] || colorSchemes.business_blue_gray
+            
+            // 根据图表类型调整数据配置
+            const chartConfig_data = {
+              type: chartType as any,
+              data: {
+                labels: previewData[dataSeries.xAxis as keyof typeof previewData] || [],
+                datasets: [{
+                  label: dataSeries.yAxis,
+                  data: previewData[dataSeries.yAxis as keyof typeof previewData] || [],
+                  backgroundColor: colors.background,
+                  borderColor: colors.border,
+                  borderWidth: 2,
+                  fill: chartType === 'area' // 只有面积图需要填充
+                }]
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                  legend: {
+                    display: chartType !== 'pie',
+                    position: 'top'
+                  },
+                  title: {
+                    display: true,
+                    text: `${chartConfig.title} (${getChartTypeName(chartType)})`
+                  }
+                },
+                scales: chartType !== 'pie' && chartType !== 'doughnut' ? {
+                  y: { 
+                    beginAtZero: true,
+                    grid: {
+                      color: 'rgba(0, 0, 0, 0.1)'
+                    }
+                  },
+                  x: { 
+                    grid: {
+                      color: 'rgba(0, 0, 0, 0.1)'
+                    }
+                  }
+                } : {}
+              }
+            }
+
+            // 创建图表实例
+            chartRefs.current[chartType] = new Chart(ctx, chartConfig_data)
+            
+          } catch (error) {
+            console.error(`创建 ${chartType} 图表失败:`, error)
+            const errorMessage = error instanceof Error ? error.message : `${chartType} 图表预览创建失败`
+            setChartPreviewError(errorMessage)
+          }
+        }
+      }
+    })
+
+    // 清理函数
+    return () => {
+      Object.keys(chartRefs.current).forEach(chartKey => {
+        if (chartRefs.current[chartKey]) {
+          chartRefs.current[chartKey].destroy()
+          delete chartRefs.current[chartKey]
+        }
+      })
+    }
+  }, [currentStep, selectedChartTypes, chartConfig, dataSeries])
 
   // 实时访问码验证
   const validateAccessCode = useCallback(async (code: string) => {
@@ -231,6 +571,21 @@ const SimpleApp: React.FC = () => {
           
           // 添加成功反馈
           setUploadProgress(100)
+          
+          // 解析Excel数据用于实时预览
+          if (result.data.file_info && result.data.file_info.file_path) {
+            // 重置相关状态
+            setExcelParsedData(null)
+            setParsingError(null)
+            setChartPreviewError(null)
+            setDataSeries({ xAxis: 'month', yAxis: 'sales' })
+            
+            parseExcelData(result.data.file_info.file_path).catch(error => {
+              console.error('Excel数据解析失败:', error)
+              // 静默失败，不影响用户上传流程
+            })
+          }
+          
           setTimeout(() => {
             setCurrentStep('chart_generation')
             setUploadProgress(0)
@@ -302,7 +657,13 @@ const SimpleApp: React.FC = () => {
           selected_chart_types: selectedChartTypes,
           width: 800,
           height: 600,
-          format: 'png'
+          format: 'png',
+          chart_config: {
+            color_scheme: chartConfig.colorScheme,
+            title: chartConfig.title,
+            show_axis_labels: chartConfig.showAxisLabels,
+            output_format: chartConfig.outputFormat
+          }
         }),
       })
 
@@ -441,6 +802,7 @@ const SimpleApp: React.FC = () => {
   const resetState = () => {
     setUploadedFile(null)
     setUploadedFileInfo(null)
+    setExcelParsedData(null)
     // setChartPreviews([]) // 暂时未使用
     setSelectedChartTypes(['bar', 'line'])
     setGeneratedCharts([])
@@ -780,11 +1142,14 @@ const SimpleApp: React.FC = () => {
               </div>
               
               {/* 配置区域 - 移动端垂直布局 */}
-              <div className={`${isMobile ? 'space-y-6' : 'grid lg:grid-cols-3 gap-8'}`}>
+              <div className={`${isMobile ? 'space-y-6' : 'grid grid-cols-12 gap-6'}`}>
                 {/* 配置面板 */}
-                <div className={isMobile ? '' : 'lg:col-span-1 space-y-6'}>
-                  <div className="professional-card p-6">
-                    <h3 className="text-lg font-semibold text-gray-800 mb-6">图表设置</h3>
+                <div className={isMobile ? '' : 'col-span-12 md:col-span-5'}>
+                  <div className="professional-card p-6 h-full flex flex-col">
+                    <h3 className="text-lg font-semibold text-gray-800 mb-6 flex-shrink-0">图表设置</h3>
+                    
+                    {/* 配置内容滚动区域 */}
+                    <div className="flex-1 overflow-y-auto pr-2 -mr-2">
                     
                     {/* 图表类型选择 */}
                     <div className="mb-6">
@@ -796,6 +1161,7 @@ const SimpleApp: React.FC = () => {
                         {['bar', 'line', 'pie', 'area', 'scatter', 'radar'].map((type) => (
                           <button
                             key={type}
+                            type="button"
                             onClick={() => handleChartTypeToggle(type)}
                             className={`chart-type-btn ${isMobile ? 'py-3 text-sm' : ''} ${
                               selectedChartTypes.includes(type) ? 'selected' : ''
@@ -808,6 +1174,102 @@ const SimpleApp: React.FC = () => {
                              type === 'scatter' ? '散点图' : '雷达图'}
                           </button>
                         ))}
+                      </div>
+                    </div>
+                    
+                    {/* Excel数据解析状态 */}
+                    {isParsingExcel && (
+                      <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-md">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                          <span className="text-sm font-medium text-blue-700">正在解析Excel数据...</span>
+                        </div>
+                        <p className="text-xs text-blue-600">请稍候，我们正在分析您的数据结构</p>
+                      </div>
+                    )}
+                    
+                    {/* 数据解析错误反馈 */}
+                    {parsingError && (
+                      <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-md">
+                        <div className="flex items-center gap-2 mb-2">
+                          <svg className="h-4 w-4 text-red-600" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                          </svg>
+                          <span className="text-sm font-medium text-red-700">数据解析失败</span>
+                        </div>
+                        <p className="text-xs text-red-600">{parsingError}</p>
+                        <p className="text-xs text-gray-500 mt-1">您仍可以继续使用默认数据进行配置</p>
+                      </div>
+                    )}
+                    
+                    {/* 图表预览错误反馈 */}
+                    {chartPreviewError && (
+                      <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-md">
+                        <div className="flex items-center gap-2 mb-2">
+                          <svg className="h-4 w-4 text-yellow-600" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                          </svg>
+                          <span className="text-sm font-medium text-yellow-700">预览生成失败</span>
+                        </div>
+                        <p className="text-xs text-yellow-600">{chartPreviewError}</p>
+                        <p className="text-xs text-gray-500 mt-1">请检查数据格式或选择其他图表类型</p>
+                      </div>
+                    )}
+                    
+                    {/* 数据解析成功反馈 */}
+                    {excelParsedData && !isParsingExcel && (
+                      <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-md">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-sm">✅</span>
+                          <span className="text-sm font-medium text-green-700">Excel数据解析成功</span>
+                        </div>
+                        <p className="text-xs text-green-600">
+                          检测到 {excelParsedData.chart_data?.raw_data?.columns?.length || 0} 列数据，
+                          已智能推荐数据系列选择
+                        </p>
+                      </div>
+                    )}
+                    
+                    {/* 数据系列选择 */}
+                    <div className="mb-6 p-4 bg-gray-50 rounded-md">
+                      <div className="flex items-center gap-2 mb-3">
+                        <span className="text-sm">📊</span>
+                        <label className="text-sm font-medium text-gray-700">数据系列选择</label>
+                      </div>
+                      
+                      {/* 数据选择 - 移动端优化布局 */}
+                      <div className={`${isMobile ? 'space-y-3' : 'grid grid-cols-2 gap-3'}`}>
+                        {/* X轴数据选择 */}
+                        <div>
+                          <label className="block text-xs text-gray-600 mb-1">X轴（类别）</label>
+                          <select 
+                            value={dataSeries.xAxis}
+                            onChange={(e) => setDataSeries(prev => ({...prev, xAxis: e.target.value}))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm"
+                          >
+                            {getDataSeriesOptions().xAxis.map(option => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        
+                        {/* Y轴数据选择 */}
+                        <div>
+                          <label className="block text-xs text-gray-600 mb-1">Y轴（数值）</label>
+                          <select 
+                            value={dataSeries.yAxis}
+                            onChange={(e) => setDataSeries(prev => ({...prev, yAxis: e.target.value}))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm"
+                          >
+                            {getDataSeriesOptions().yAxis.map(option => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                       </div>
                     </div>
                     
@@ -839,6 +1301,7 @@ const SimpleApp: React.FC = () => {
                         ]).map((scheme) => (
                           <button
                             key={scheme.value}
+                            type="button"
                             onClick={() => setChartConfig(prev => ({...prev, colorScheme: scheme.value}))}
                             className={`chart-type-btn text-left ${isMobile ? 'py-3' : ''} ${
                               chartConfig.colorScheme === scheme.value ? 'selected' : ''
@@ -869,6 +1332,7 @@ const SimpleApp: React.FC = () => {
                           ]).map((format) => (
                             <button
                               key={format.value}
+                              type="button"
                               onClick={() => setChartConfig(prev => ({...prev, outputFormat: format.value}))}
                               className={`chart-type-btn flex-1 ${isMobile ? 'py-3' : ''} ${
                                 chartConfig.outputFormat === format.value ? 'selected' : ''
@@ -891,6 +1355,7 @@ const SimpleApp: React.FC = () => {
                           ]).map((res) => (
                             <button
                               key={res.value}
+                              type="button"
                               onClick={() => setChartConfig(prev => ({...prev, resolution: res.value}))}
                               className={`chart-type-btn flex-1 ${isMobile ? 'py-3' : ''} ${
                                 chartConfig.resolution === res.value ? 'selected' : ''
@@ -903,44 +1368,132 @@ const SimpleApp: React.FC = () => {
                         </div>
                       </div>
                     </div>
+                    
+                    {/* 配置内容滚动区域结束 */}
+                    </div>
                   </div>
                 </div>
                 
                 {/* 预览区域 */}
-                <div className={isMobile ? '' : 'lg:col-span-2'}>
-                  <div className="professional-card p-6 h-full">
-                    <h3 className="text-lg font-semibold text-gray-800 mb-4">实时预览</h3>
+                <div className={isMobile ? '' : 'col-span-12 md:col-span-7'}>
+                  <div className="professional-card p-6 h-full flex flex-col">
+                    <h3 className="text-lg font-semibold text-gray-800 mb-4 flex-shrink-0">实时预览</h3>
                     
                     {/* 预览区域 */}
-                    <div className={`bg-gray-50 rounded-lg p-4 md:p-8 text-center flex items-center justify-center border-2 border-dashed border-gray-200 ${
-                      isMobile ? 'min-h-[250px]' : 'min-h-[400px]'
-                    }`}>
+                    <div className="bg-white rounded-lg border border-gray-200 p-4 flex-1">
                       {selectedChartTypes.length > 0 ? (
                         <div className="space-y-4">
-                          <div className={`mx-auto bg-gradient-to-br from-blue-100 to-purple-100 rounded-lg flex items-center justify-center ${
-                            isMobile ? 'w-20 h-20' : 'w-32 h-32'
-                          }`}>
-                            <span className={isMobile ? 'text-xl' : 'text-2xl'}>📊</span>
+                          {/* 图表类型切换标签 */}
+                          <div className="flex flex-wrap gap-2 border-b border-gray-200 pb-3">
+                            <span className="text-sm font-medium text-gray-600 self-center mr-2">预览图表:</span>
+                            {selectedChartTypes.map((chartType, index) => (
+                              <button
+                                key={chartType}
+                                type="button"
+                                onClick={() => setActivePreviewIndex(index)}
+                                className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 transform hover:scale-105 ${
+                                  activePreviewIndex === index
+                                    ? 'bg-blue-600 text-white shadow-md'
+                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200 hover:shadow-sm'
+                                }`}
+                              >
+                                {getChartTypeName(chartType)}
+                                {activePreviewIndex === index && (
+                                  <span className="ml-2 text-xs">●</span>
+                                )}
+                              </button>
+                            ))}
                           </div>
-                          <div>
-                            <p className={`font-medium text-gray-800 ${isMobile ? 'text-sm' : ''}`}>{chartConfig.title}</p>
-                            <p className={`text-gray-500 ${isMobile ? 'text-xs' : 'text-sm'}`}>
-                              {selectedChartTypes.map(type => 
-                                type === 'bar' ? '柱状图' : 
-                                type === 'line' ? '折线图' : 
-                                type === 'pie' ? '饼图' : 
-                                type === 'area' ? '面积图' : 
-                                type === 'scatter' ? '散点图' : '雷达图'
-                              ).join(' / ')}
+                          
+                          {/* 当前预览图表标题 */}
+                          <div className="text-center">
+                            <h4 className="text-lg font-semibold text-gray-800">
+                              {getChartTypeName(selectedChartTypes[activePreviewIndex])} 预览
+                            </h4>
+                            <p className="text-sm text-gray-500 mt-1">
+                              配置: {chartConfig.title} · {chartConfig.colorScheme.replace('_', ' ')}
                             </p>
-                            <p className={`text-gray-400 mt-2 ${isMobile ? 'text-xs' : 'text-xs'}`}>
-                              {chartConfig.colorScheme === 'business_blue_gray' ? '商务蓝灰' : '专业黑灰'} · {chartConfig.outputFormat.toUpperCase()} · {chartConfig.resolution}
-                            </p>
+                          </div>
+                          
+                          {/* 多图表预览区域 */}
+                          <div className="relative h-80 w-full bg-gradient-to-br from-gray-50 to-white rounded-lg border-2 border-dashed border-gray-200 overflow-hidden">
+                            {selectedChartTypes.map((chartType, index) => (
+                              <div
+                                key={chartType}
+                                className={`absolute inset-0 transition-all duration-300 ease-in-out ${
+                                  activePreviewIndex === index 
+                                    ? 'opacity-100 scale-100' 
+                                    : 'opacity-0 scale-95 pointer-events-none'
+                                }`}
+                              >
+                                <canvas
+                                  ref={(el) => {
+                                    canvasRefs.current[`chart-canvas-${chartType}`] = el
+                                  }}
+                                  className="w-full h-full p-2"
+                                  id={`chart-canvas-${chartType}`}
+                                ></canvas>
+                              </div>
+                            ))}
+                          </div>
+                          
+                          {/* 预览指示器和导航 */}
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center space-x-2">
+                              <span className="text-xs text-gray-500">
+                                {activePreviewIndex + 1} / {selectedChartTypes.length}
+                              </span>
+                              <div className="flex space-x-1.5">
+                                {selectedChartTypes.map((chartType, index) => (
+                                  <button
+                                    key={chartType}
+                                    type="button"
+                                    onClick={() => setActivePreviewIndex(index)}
+                                    className={`w-2.5 h-2.5 rounded-full transition-all duration-200 ${
+                                      activePreviewIndex === index 
+                                        ? 'bg-blue-600 ring-2 ring-blue-200' 
+                                        : 'bg-gray-300 hover:bg-gray-400'
+                                    }`}
+                                    title={`${getChartTypeName(chartType)} (${index + 1}/${selectedChartTypes.length})`}
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                            
+                            {/* 快速导航按钮 */}
+                            <div className="flex space-x-1">
+                              <button
+                                type="button"
+                                onClick={() => setActivePreviewIndex(prev => 
+                                  prev > 0 ? prev - 1 : selectedChartTypes.length - 1
+                                )}
+                                disabled={selectedChartTypes.length <= 1}
+                                className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                title="上一个"
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
+                                </svg>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setActivePreviewIndex(prev => 
+                                  prev < selectedChartTypes.length - 1 ? prev + 1 : 0
+                                )}
+                                disabled={selectedChartTypes.length <= 1}
+                                className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                title="下一个"
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
+                                </svg>
+                              </button>
+                            </div>
                           </div>
                         </div>
                       ) : (
-                        <div className="text-center">
-                          <div className={`bg-gray-200 rounded-lg flex items-center justify-center mx-auto mb-4 ${
+                        <div className="text-center py-12">
+                          <div className={`bg-gray-100 rounded-lg flex items-center justify-center mx-auto mb-4 ${
                             isMobile ? 'w-12 h-12' : 'w-16 h-16'
                           }`}>
                             <span className={`text-gray-400 ${isMobile ? 'text-lg' : 'text-xl'}`}>📊</span>
@@ -950,8 +1503,8 @@ const SimpleApp: React.FC = () => {
                       )}
                     </div>
                     
-                    {/* 操作按钮 */}
-                    <div className={`mt-6 flex gap-3 ${isMobile ? 'flex-col' : 'flex-col sm:flex-row'}`}>
+                    {/* 操作按钮 - 固定在卡片底部 */}
+                    <div className={`mt-6 flex gap-3 ${isMobile ? 'flex-col' : 'flex-col sm:flex-row'} flex-shrink-0`}>
                       <button
                         onClick={handleGenerateCharts}
                         disabled={isLoading || selectedChartTypes.length === 0}

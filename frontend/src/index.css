@@ -226,9 +226,17 @@ body {
 }
 
 .chart-type-btn.selected {
-  background: var(--primary-600);
-  color: white;
-  border-color: var(--primary-600);
+  background: var(--primary-600) !important;
+  color: white !important;
+  border-color: var(--primary-600) !important;
+}
+
+.chart-type-btn.selected .font-medium {
+  color: white !important;
+}
+
+.chart-type-btn.selected .text-gray-500 {
+  color: rgba(255, 255, 255, 0.8) !important;
 }
 
 /* === 动画效果 === */
@@ -284,6 +292,33 @@ body {
     padding: 8px 12px;
     font-size: 13px;
   }
+  
+  /* 图表配置页面特殊优化 */
+  .chart-config-grid {
+    gap: 12px;
+  }
+  
+  .preview-area {
+    margin-top: 16px;
+  }
+  
+  .data-series-select {
+    font-size: 14px;
+    padding: 10px 8px;
+  }
+}
+
+/* === 中等屏幕优化 === */
+@media (min-width: 768px) and (max-width: 1024px) {
+  .professional-card {
+    padding: 20px;
+  }
+  
+  .chart-type-btn {
+    min-width: 90px;
+    padding: 10px 14px;
+    font-size: 14px;
+  }
 }
 
 /* === 安全区域处理 === */
@@ -303,6 +338,34 @@ body {
 /* === 触摸优化 === */
 .touch-manipulation {
   touch-action: manipulation;
+}
+
+/* === 移动端滚动优化 === */
+.mobile-scroll-container {
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+}
+
+/* === 移动端按钮触摸目标 === */
+@media (max-width: 768px) {
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  .chart-config-button {
+    padding: 16px 24px;
+    font-size: 16px;
+    min-height: 48px;
+  }
+  
+  /* 防止移动端文字被选中 */
+  .no-select {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+  }
 }
 
 /* === 状态指示器 === */

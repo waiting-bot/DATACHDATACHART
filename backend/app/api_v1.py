@@ -238,6 +238,47 @@ async def upload_file(
         logger.error(f"文件上传失败: {e}")
         raise HTTPException(status_code=500, detail=f"文件上传失败: {str(e)}")
 
+# === Excel数据解析API ===
+
+@router.post("/files/parse-excel", response_model=StandardResponse)
+@log_performance
+async def parse_excel_data(
+    request: ExcelParseRequest,
+    db: Session = Depends(get_db)
+):
+    """解析Excel文件并返回数据结构信息"""
+    try:
+        # 验证文件是否存在
+        if not Path(request.file_path).exists():
+            raise HTTPException(status_code=404, detail="文件不存在")
+        
+        # 解析Excel文件
+        excel_data = excel_parser.parse_excel_file(request.file_path)
+        
+        # 构建响应数据
+        response_data = ExcelParseResponse(
+            success=True,
+            message="Excel文件解析成功",
+            file_info={
+                "file_path": request.file_path,
+                "chart_type": request.chart_type.value if request.chart_type else None
+            },
+            data_validation=excel_data.get("data_validation"),
+            processing_info=excel_data.get("processing_info"),
+            data_types=excel_data.get("data_types"),
+            suggested_charts=excel_data.get("suggested_charts"),
+            chart_data=excel_data.get("chart_data"),
+            summary=excel_data.get("summary")
+        )
+        
+        return create_success_response(response_data)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Excel文件解析失败: {e}")
+        raise HTTPException(status_code=500, detail=f"Excel文件解析失败: {str(e)}")
+
 # === 图表生成API ===
 
 @router.post("/charts/generate", response_model=StandardResponse)
@@ -361,13 +402,18 @@ async def generate_selected_charts(
         # 生成选中的图表
         charts = []
         for chart_type in request.selected_chart_types:
+            # 使用配置参数或默认值
+            chart_title = request.chart_config.title if request.chart_config else f"{chart_type}图表"
+            color_scheme = request.chart_config.color_scheme if request.chart_config else "business_blue_gray"
+            
             chart_result = chart_generator.generate_chart(
                 data=excel_data,
                 chart_type=chart_type,
-                title=f"{chart_type}图表",
+                title=chart_title,
                 width=request.width or 800,
                 height=request.height or 600,
-                format=request.format or 'png'
+                format=request.format or 'png',
+                color_scheme=color_scheme
             )
             
             if not chart_result.get('success'):

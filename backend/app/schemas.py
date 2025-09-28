@@ -207,6 +207,13 @@ class PreviewGenerationResponse(BaseModel):
     previews: List[PreviewChartInfo]
     file_info: Optional[Dict[str, Any]] = None
 
+class ChartConfig(BaseModel):
+    """图表配置模型"""
+    color_scheme: Optional[str] = Field("business_blue_gray", description="配色方案")
+    title: Optional[str] = Field("数据图表", description="图表标题")
+    show_axis_labels: Optional[bool] = Field(True, description="显示轴标签")
+    output_format: Optional[str] = Field("png", description="输出格式")
+
 class SelectedChartsGenerationRequest(BaseModel):
     """选中图表生成请求模型"""
     file_path: str = Field(..., description="文件路径")
@@ -215,6 +222,7 @@ class SelectedChartsGenerationRequest(BaseModel):
     width: Optional[int] = Field(800, description="图表宽度")
     height: Optional[int] = Field(600, description="图表高度")
     format: Optional[str] = Field("png", description="输出格式")
+    chart_config: Optional[ChartConfig] = Field(None, description="图表配置")
 
 class GeneratedChartInfo(BaseModel):
     """生成的图表信息模型"""

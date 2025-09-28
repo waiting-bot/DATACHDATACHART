@@ -41,6 +41,28 @@ class ChartGenerator:
             'responsive': True
         }
         
+        # 颜色方案配置
+        self.color_schemes = {
+            'business_blue_gray': {
+                'primary': '#3b82f6',
+                'secondary': '#64748b', 
+                'background': 'rgba(59, 130, 246, 0.1)',
+                'border': '#3b82f6'
+            },
+            'modern_blue': {
+                'primary': '#2563eb',
+                'secondary': '#60a5fa',
+                'background': 'rgba(37, 99, 235, 0.1)',
+                'border': '#2563eb'
+            },
+            'elegant_purple': {
+                'primary': '#9333ea',
+                'secondary': '#a855f7',
+                'background': 'rgba(147, 51, 234, 0.1)',
+                'border': '#9333ea'
+            }
+        }
+        
         # 默认布局配置
         self.default_layout = {
             'font': {
@@ -66,7 +88,8 @@ class ChartGenerator:
                       title: str = "数据图表",
                       width: int = 800,
                       height: int = 600,
-                      format: str = 'png') -> Dict[str, Any]:
+                      format: str = 'png',
+                      color_scheme: str = 'business_blue_gray') -> Dict[str, Any]:
         """
         生成图表
         
@@ -77,6 +100,7 @@ class ChartGenerator:
             width: 图表宽度
             height: 图表高度
             format: 输出格式 ('png' 或 'svg')
+            color_scheme: 配色方案
             
         Returns:
             生成结果
@@ -86,18 +110,37 @@ class ChartGenerator:
             if chart_type not in self.supported_chart_types:
                 raise ValueError(f"不支持的图表类型: {chart_type}")
             
+            # 获取颜色方案
+            scheme = self.color_schemes.get(color_scheme, self.color_schemes['business_blue_gray'])
+            
             # 转换Excel数据格式到图表生成器格式
             converted_data = self._convert_excel_data_to_chart_format(data)
             
             # 生成图表（不包含标题，标题在主布局中设置）
             fig = self.supported_chart_types[chart_type](converted_data, "")
             
+            # 应用颜色方案到图表
+            if hasattr(fig.data[0], 'marker'):
+                # 对于散点图等有marker的图表类型
+                fig.data[0].marker.color = scheme['primary']
+                fig.data[0].marker.line.color = scheme['border']
+            elif hasattr(fig.data[0], 'line'):
+                # 对于线图等有line的图表类型
+                fig.data[0].line.color = scheme['primary']
+                if hasattr(fig.data[0], 'fillcolor'):
+                    fig.data[0].fillcolor = scheme['background']
+            elif hasattr(fig.data[0], 'marker'):
+                # 对于条形图等
+                fig.data[0].marker.color = scheme['primary']
+                fig.data[0].marker.line.color = scheme['border']
+            
             # 应用默认布局（包含尺寸和标题）
             layout_config = self.default_layout.copy()
             layout_config.update({
                 'width': width,
                 'height': height,
-                'title': title
+                'title': title,
+                'colorway': [scheme['primary'], scheme['secondary']]  # 设置图表颜色序列
             })
             fig.update_layout(**layout_config)
             
