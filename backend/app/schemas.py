@@ -25,6 +25,16 @@ class ChartType(str, Enum):
     BOX = "box"
     VIOLIN = "violin"
     HISTOGRAM = "histogram"
+    TABLE = "table"
+    RADAR = "radar"
+    
+class CombinationChartType(str, Enum):
+    """组合图表类型枚举"""
+    BAR_BAR = "bar_bar"  # 柱形+柱形
+    LINE_LINE = "line_line"  # 折线+折线
+    BAR_LINE = "bar_line"  # 柱形+折线
+    BAR_AREA = "bar_area"  # 柱形+面积
+    LINE_AREA = "line_area"  # 折线+面积
 
 # 访问码相关模型
 class AccessCodeBase(BaseModel):
@@ -181,6 +191,39 @@ class ChartTypeInfo(BaseModel):
 class ChartTypesResponse(BaseModel):
     """支持的图表类型响应模型"""
     chart_types: List[ChartTypeInfo]
+
+# 智能推荐相关模型
+class DataFeatures(BaseModel):
+    """数据特征模型"""
+    column_count: int = Field(..., description="总列数")
+    row_count: int = Field(..., description="总行数")
+    numeric_columns: List[str] = Field(..., description="数值列")
+    categorical_columns: List[str] = Field(..., description="分类列")
+    temporal_columns: List[str] = Field(..., description="时间列")
+    data_types: Dict[str, str] = Field(..., description="数据类型映射")
+    has_multiple_series: bool = Field(..., description="是否有多数据系列")
+    has_time_data: bool = Field(..., description="是否包含时间数据")
+
+class ChartRecommendation(BaseModel):
+    """图表推荐模型"""
+    chart_type: str = Field(..., description="图表类型")
+    confidence: float = Field(..., ge=0, le=1, description="推荐置信度")
+    reason: str = Field(..., description="推荐原因")
+    suitable_scenarios: List[str] = Field(..., description="适用场景")
+    suggested_data_mapping: Optional[Dict[str, Any]] = Field(None, description="建议的数据映射")
+
+class SmartRecommendationRequest(BaseModel):
+    """智能推荐请求模型"""
+    file_path: str = Field(..., description="Excel文件路径")
+    max_recommendations: int = Field(2, description="最大推荐数量")
+
+class SmartRecommendationResponse(BaseModel):
+    """智能推荐响应模型"""
+    success: bool
+    message: str
+    data_features: DataFeatures
+    recommendations: List[ChartRecommendation]
+    file_info: Optional[Dict[str, Any]] = None
 
 # 预览图相关模型
 class PreviewGenerationRequest(BaseModel):

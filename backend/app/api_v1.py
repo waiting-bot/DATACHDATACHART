@@ -279,6 +279,142 @@ async def parse_excel_data(
         logger.error(f"Excel文件解析失败: {e}")
         raise HTTPException(status_code=500, detail=f"Excel文件解析失败: {str(e)}")
 
+# === 智能推荐API ===
+
+@router.post("/charts/smart-recommendations", response_model=StandardResponse)
+@log_performance
+async def smart_recommend_charts(
+    request: SmartRecommendationRequest,
+    db: Session = Depends(get_db)
+):
+    """基于Excel文件数据特征智能推荐图表类型"""
+    try:
+        # 验证文件是否存在
+        if not Path(request.file_path).exists():
+            raise HTTPException(status_code=404, detail="文件不存在")
+        
+        # 解析Excel文件获取数据特征
+        excel_data = excel_parser.parse_excel_file(request.file_path)
+        
+        # 分析数据特征
+        data_features = analyze_data_features(excel_data)
+        
+        # 基于数据特征生成推荐
+        recommendations = generate_chart_recommendations(data_features, request.max_recommendations)
+        
+        # 构建响应
+        response_data = SmartRecommendationResponse(
+            success=True,
+            message="智能推荐生成成功",
+            data_features=data_features,
+            recommendations=recommendations,
+            file_info={
+                "file_path": request.file_path,
+                "total_rows": len(excel_data.get("chart_data", {}).get("raw_data", {}).get("data", [])),
+                "total_columns": len(excel_data.get("chart_data", {}).get("raw_data", {}).get("columns", []))
+            }
+        )
+        
+        return create_success_response(response_data)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"智能推荐失败: {e}")
+        raise HTTPException(status_code=500, detail=f"智能推荐失败: {str(e)}")
+
+def analyze_data_features(excel_data: Dict[str, Any]) -> DataFeatures:
+    """分析Excel数据特征"""
+    chart_data = excel_data.get("chart_data", {})
+    raw_data = chart_data.get("raw_data", {})
+    
+    columns = raw_data.get("columns", [])
+    data_types = raw_data.get("data_types", {})
+    data_rows = raw_data.get("data", [])
+    
+    # 分类数据列
+    numeric_columns = [col for col in columns if data_types.get(col) == "numeric"]
+    categorical_columns = [col for col in columns if data_types.get(col) in ["string", "category"]]
+    temporal_columns = [col for col in columns if any(keyword in col.lower() for keyword in ["时间", "日期", "time", "date", "年", "月", "日", "季度"])]
+    
+    return DataFeatures(
+        column_count=len(columns),
+        row_count=len(data_rows),
+        numeric_columns=numeric_columns,
+        categorical_columns=categorical_columns,
+        temporal_columns=temporal_columns,
+        data_types=data_types,
+        has_multiple_series=len(numeric_columns) > 1,
+        has_time_data=len(temporal_columns) > 0
+    )
+
+def generate_chart_recommendations(features: DataFeatures, max_recommendations: int) -> List[ChartRecommendation]:
+    """基于数据特征生成图表推荐"""
+    recommendations = []
+    
+    # 推荐规则引擎
+    if features.has_time_data and len(features.numeric_columns) >= 1:
+        # 时间序列数据
+        recommendations.append(ChartRecommendation(
+            chart_type="line",
+            confidence=0.9,
+            reason="检测到时间序列数据，适合展示趋势变化",
+            suitable_scenarios=["趋势分析", "时间序列展示", "变化监测"],
+            suggested_data_mapping={"x_axis": features.temporal_columns[0], "y_axis": features.numeric_columns[0]}
+        ))
+        
+        if len(features.numeric_columns) >= 2:
+            recommendations.append(ChartRecommendation(
+                chart_type="bar_line",
+                confidence=0.85,
+                reason="时间序列+多数值数据，适合对比数值与趋势",
+                suitable_scenarios=["多指标趋势对比", "目标达成分析"],
+                suggested_data_mapping={"x_axis": features.temporal_columns[0], "y1_axis": features.numeric_columns[0], "y2_axis": features.numeric_columns[1]}
+            ))
+    
+    if len(features.categorical_columns) >= 1 and len(features.numeric_columns) >= 1:
+        # 分类对比数据
+        recommendations.append(ChartRecommendation(
+            chart_type="bar",
+            confidence=0.8,
+            reason="检测到分类+数值数据，适合对比不同类别",
+            suitable_scenarios=["类别对比", "排名展示", "性能比较"],
+            suggested_data_mapping={"x_axis": features.categorical_columns[0], "y_axis": features.numeric_columns[0]}
+        ))
+        
+        if len(features.numeric_columns) == 1 and len(features.categorical_columns) <= 5:
+            recommendations.append(ChartRecommendation(
+                chart_type="pie",
+                confidence=0.75,
+                reason="分类数量适中+单一数值，适合展示占比关系",
+                suitable_scenarios=["占比分析", "构成展示", "份额对比"],
+                suggested_data_mapping={"labels": features.categorical_columns[0], "values": features.numeric_columns[0]}
+            ))
+    
+    if len(features.numeric_columns) >= 2 and not features.has_time_data:
+        # 多数值数据对比
+        recommendations.append(ChartRecommendation(
+            chart_type="scatter",
+            confidence=0.7,
+            reason="检测到多个数值列，适合分析相关性",
+            suitable_scenarios=["相关性分析", "数据分布", "异常值检测"],
+            suggested_data_mapping={"x_axis": features.numeric_columns[0], "y_axis": features.numeric_columns[1]}
+        ))
+    
+    if len(features.categorical_columns) >= 2 and len(features.numeric_columns) >= 1:
+        # 多维度数据
+        recommendations.append(ChartRecommendation(
+            chart_type="radar",
+            confidence=0.65,
+            reason="检测到多维度分类数据，适合多指标对比",
+            suitable_scenarios=["多维度评估", "能力雷达图", "综合分析"],
+            suggested_data_mapping={"categories": features.categorical_columns[:5], "values": features.numeric_columns[0]}
+        ))
+    
+    # 按置信度排序，返回前N个推荐
+    recommendations.sort(key=lambda x: x.confidence, reverse=True)
+    return recommendations[:max_recommendations]
+
 # === 图表生成API ===
 
 @router.post("/charts/generate", response_model=StandardResponse)
