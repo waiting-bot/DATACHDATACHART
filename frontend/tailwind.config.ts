@@ -77,6 +77,11 @@ export default {
         '2xl': '1536px',
       },
     },
+    extend: {
+      maxWidth: {
+        '8xl': '96rem', // 1536px
+      }
+    }
   },
   plugins: [],
 }

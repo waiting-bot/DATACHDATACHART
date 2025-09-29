@@ -825,26 +825,87 @@ const SimpleApp: React.FC = () => {
               const chartConfig_instance = chartConfigs[chartType] || currentChartConfig
               const additionalYAxes = chartConfig_instance.dataSeries.additionalYAxes || []
               
-              let datasets = []
-              
-              // 主数据系列（柱状图）
-              datasets.push({
-                label: dataSeries.yAxis,
-                data: previewData[dataSeries.yAxis as keyof typeof previewData] || [],
-                backgroundColor: colors.background,
-                borderColor: colors.border,
-                borderWidth: 1,
-                type: 'bar',
-                yAxisID: 'y'
+              // 调试信息
+              console.log('组合图表配置:', {
+                chartType,
+                chartConfig_instance,
+                dataSeries,
+                previewData: Object.keys(previewData)
               })
               
-              // 第二数据系列（折线图）
-              if (dataOptions.yAxis.length > 1) {
-                const secondYAxis = dataOptions.yAxis[1]
-                if (secondYAxis !== dataSeries.yAxis) {
+              // 数据范围检测和自动调整函数
+              const calculateDataRange = (dataKey: string) => {
+                const data = previewData[dataKey as keyof typeof previewData] || []
+                const numericData = data.map(val => typeof val === 'number' ? val : parseFloat(val)).filter(val => !isNaN(val))
+                if (numericData.length === 0) return { min: 0, max: 100 }
+                const min = Math.min(...numericData)
+                const max = Math.max(...numericData)
+                const range = max - min
+                const padding = range * 0.1 // 10% padding
+                return { 
+                  min: Math.max(0, min - padding), 
+                  max: max + padding 
+                }
+              }
+              
+              // 自动调整Y轴配置
+              const autoAdjustYAxes = () => {
+                const mainYAxisData = chartConfig_instance.dataSeries.yAxis || dataSeries.yAxis
+                const secondYAxisData = chartConfig_instance.dataSeries.yAxis2
+                const yAxisRanges: Record<string, { min: number; max: number }> = {}
+                
+                // 计算主Y轴数据范围
+                if (mainYAxisData) {
+                  yAxisRanges.main = calculateDataRange(mainYAxisData)
+                }
+                
+                // 计算第二Y轴数据范围
+                if (secondYAxisData) {
+                  yAxisRanges.second = calculateDataRange(secondYAxisData)
+                }
+                
+                // 计算额外Y轴数据范围
+                additionalYAxes.forEach(axis => {
+                  if (axis.dataKey) {
+                    yAxisRanges[axis.id] = calculateDataRange(axis.dataKey)
+                  }
+                })
+                
+                return yAxisRanges
+              }
+              
+              const yAxisRanges = autoAdjustYAxes()
+              let datasets = []
+              
+              try {
+                // 获取样式和布局配置
+                const chartStyling = chartConfig_instance.styling
+                const chartLayout = chartConfig_instance.layout
+                
+                // 主数据系列（使用图表独立配置）
+                const mainYAxisData = chartConfig_instance.dataSeries.yAxis || dataSeries.yAxis
+                datasets.push({
+                  label: mainYAxisData,
+                  data: previewData[mainYAxisData as keyof typeof previewData] || [],
+                  backgroundColor: colors.background,
+                  borderColor: colors.border,
+                  borderWidth: 1,
+                  type: 'bar',
+                  yAxisID: 'y'
+                })
+                
+                // 第二数据系列（折线图）
+                const secondYAxisData = chartConfig_instance.dataSeries.yAxis2
+                console.log('第二Y轴数据:', {
+                  secondYAxisData: secondYAxisData || '未设置',
+                  mainYAxisData: mainYAxisData || '未设置',
+                  chartConfig_instance: chartConfig_instance.dataSeries,
+                  dataOptions: dataOptions.yAxis
+                })
+                if (secondYAxisData && secondYAxisData !== mainYAxisData) {
                   datasets.push({
-                    label: secondYAxis,
-                    data: previewData[secondYAxis as keyof typeof previewData] || [],
+                    label: secondYAxisData,
+                    data: previewData[secondYAxisData as keyof typeof previewData] || [],
                     backgroundColor: 'transparent',
                     borderColor: colors.secondary?.border || 'rgba(16, 185, 129, 1)',
                     borderWidth: 2,
@@ -852,27 +913,149 @@ const SimpleApp: React.FC = () => {
                     yAxisID: 'y1'
                   })
                 }
-              }
-              
-              // 添加额外的Y轴数据系列
-              additionalYAxes.forEach(axis => {
-                datasets.push({
-                  label: axis.dataKey,
-                  data: previewData[axis.dataKey as keyof typeof previewData] || [],
-                  backgroundColor: axis.type === 'bar' ? axis.color : 'transparent',
-                  borderColor: axis.color,
-                  borderWidth: 2,
-                  type: axis.type === 'area' ? 'line' : axis.type,
-                  fill: axis.type === 'area' ? 'origin' : false,
-                  yAxisID: axis.position === 'right' ? 'y1' : 'y'
+                
+                // 添加额外的Y轴数据系列
+                additionalYAxes.forEach(axis => {
+                  if (axis.dataKey && axis.dataKey !== mainYAxisData && axis.dataKey !== secondYAxisData) {
+                    datasets.push({
+                      label: axis.dataKey,
+                      data: previewData[axis.dataKey as keyof typeof previewData] || [],
+                      backgroundColor: axis.type === 'bar' ? axis.color : 'transparent',
+                      borderColor: axis.color,
+                      borderWidth: 2,
+                      type: axis.type === 'area' ? 'line' : axis.type,
+                      fill: axis.type === 'area' ? 'origin' : false,
+                      yAxisID: axis.position === 'right' ? 'y1' : 'y'
+                    })
+                  }
                 })
-              })
-              
-              chartConfig_data = {
-                type: 'bar',
-                data: {
-                  labels: previewData[dataSeries.xAxis as keyof typeof previewData] || [],
-                  datasets: datasets
+                
+                // 使用图表独立配置的X轴数据
+                const xAxisData = chartConfig_instance.dataSeries.xAxis || dataSeries.xAxis
+                chartConfig_data = {
+                  type: 'bar',
+                  data: {
+                    labels: previewData[xAxisData as keyof typeof previewData] || [],
+                    datasets: datasets
+                  },
+                  options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                      legend: {
+                        display: chartStyling.showLegend && chartType !== 'pie' && chartType !== 'doughnut',
+                        position: chartStyling.legendPosition,
+                        labels: {
+                          boxWidth: 12,
+                          padding: 8,
+                          font: {
+                            size: 11
+                          }
+                        }
+                      },
+                      title: {
+                        display: !!chartStyling.title,
+                        text: chartStyling.title || `${getChartTypeName(chartType)}`,
+                        font: {
+                          size: 14,
+                          weight: 'bold'
+                        }
+                      },
+                      datalabels: {
+                        display: chartStyling.showDataLabels,
+                        color: chartStyling.dataLabelColor || '#fff',
+                        anchor: chartStyling.dataLabelPosition || 'center',
+                        font: {
+                          weight: 'bold',
+                          size: 10
+                        },
+                        formatter: (value: number) => {
+                          if (chartStyling.dataLabelFormat === '百分比') {
+                            return `${value}%`;
+                          } else if (chartStyling.dataLabelFormat === '1位小数') {
+                            return value.toFixed(1);
+                          } else if (chartStyling.dataLabelFormat === '2位小数') {
+                            return value.toFixed(2);
+                          } else {
+                            return value.toString();
+                          }
+                        }
+                      }
+                    },
+                    scales: {
+                      y: {
+                        type: 'linear',
+                        display: chartLayout.showAxisLabels,
+                        position: 'left',
+                        beginAtZero: true,
+                        min: yAxisRanges.main?.min,
+                        max: yAxisRanges.main?.max,
+                        grid: {
+                          display: chartStyling.showGridLines,
+                          color: 'rgba(0, 0, 0, 0.1)'
+                        },
+                        ticks: {
+                          font: {
+                            size: 10
+                          }
+                        },
+                        title: {
+                          display: !!chartLayout.yAxisLabel,
+                          text: chartLayout.yAxisLabel
+                        }
+                      },
+                      y1: {
+                        type: 'linear',
+                        display: yAxisRanges.second ? true : false,
+                        position: 'right',
+                        beginAtZero: true,
+                        min: yAxisRanges.second?.min,
+                        max: yAxisRanges.second?.max,
+                        grid: {
+                          drawOnChartArea: false
+                        },
+                        ticks: {
+                          font: {
+                            size: 10
+                          }
+                        }
+                      },
+                      x: { 
+                        display: chartLayout.showAxisLabels,
+                        grid: {
+                          display: chartStyling.showGridLines,
+                          color: 'rgba(0, 0, 0, 0.1)'
+                        },
+                        ticks: {
+                          font: {
+                            size: 10
+                          }
+                        },
+                        title: {
+                          display: !!chartLayout.xAxisLabel,
+                          text: chartLayout.xAxisLabel
+                        }
+                      }
+                    }
+                  }
+                }
+              } catch (error) {
+                console.error('组合图表生成错误:', error)
+                // 如果出错，使用默认的柱状图配置
+                const fallbackXAxis = chartConfig_instance.dataSeries.xAxis || dataSeries.xAxis
+                const fallbackYAxis = chartConfig_instance.dataSeries.yAxis || dataSeries.yAxis
+                chartConfig_data = {
+                  type: 'bar',
+                  data: {
+                    labels: previewData[fallbackXAxis as keyof typeof previewData] || [],
+                    datasets: [{
+                      label: fallbackYAxis,
+                      data: previewData[fallbackYAxis as keyof typeof previewData] || [],
+                      backgroundColor: colors.background,
+                      borderColor: colors.border,
+                      borderWidth: 1
+                    }]
+                  }
                 }
               }
             } else if (chartType === 'scatter') {
@@ -983,95 +1166,42 @@ const SimpleApp: React.FC = () => {
                   }
                 }
               },
-              scales: chartType !== 'pie' && chartType !== 'doughnut' ? 
-                (chartType === 'combination' ? {
-                  // 组合图表双Y轴配置
-                  y: {
-                    type: 'linear',
-                    display: chartLayout.showAxisLabels,
-                    position: 'left',
-                    beginAtZero: true,
-                    grid: {
-                      display: chartStyling.showGridLines,
-                      color: 'rgba(0, 0, 0, 0.1)'
-                    },
-                    ticks: {
-                      font: {
-                        size: 10
-                      }
-                    },
-                    title: {
-                      display: !!chartLayout.yAxisLabel,
-                      text: chartLayout.yAxisLabel
+              scales: chartType !== 'pie' && chartType !== 'doughnut' && chartType !== 'combination' ? {
+                // 普通图表单Y轴配置（排除组合图表，因为它有自己的配置）
+                y: { 
+                  display: chartLayout.showAxisLabels,
+                  beginAtZero: true,
+                  grid: {
+                    display: chartStyling.showGridLines,
+                    color: 'rgba(0, 0, 0, 0.1)'
+                  },
+                  ticks: {
+                    font: {
+                      size: 10
                     }
                   },
-                  y1: {
-                    type: 'linear',
-                    display: true,
-                    position: 'right',
-                    beginAtZero: true,
-                    grid: {
-                      drawOnChartArea: false
-                    },
-                    ticks: {
-                      font: {
-                        size: 10
-                      }
-                    }
-                  },
-                  x: { 
-                    display: chartLayout.showAxisLabels,
-                    grid: {
-                      display: chartStyling.showGridLines,
-                      color: 'rgba(0, 0, 0, 0.1)'
-                    },
-                    ticks: {
-                      font: {
-                        size: 10
-                      }
-                    },
-                    title: {
-                      display: !!chartLayout.xAxisLabel,
-                      text: chartLayout.xAxisLabel
-                    }
+                  title: {
+                    display: !!chartLayout.yAxisLabel,
+                    text: chartLayout.yAxisLabel
                   }
-                } : {
-                  // 普通图表单Y轴配置
-                  y: { 
-                    display: chartLayout.showAxisLabels,
-                    beginAtZero: true,
-                    grid: {
-                      display: chartStyling.showGridLines,
-                      color: 'rgba(0, 0, 0, 0.1)'
-                    },
-                    ticks: {
-                      font: {
-                        size: 10
-                      }
-                    },
-                    title: {
-                      display: !!chartLayout.yAxisLabel,
-                      text: chartLayout.yAxisLabel
+                },
+                x: { 
+                  display: chartLayout.showAxisLabels,
+                  grid: {
+                    display: chartStyling.showGridLines,
+                    color: 'rgba(0, 0, 0, 0.1)'
+                  },
+                  ticks: {
+                    font: {
+                      size: 10
                     }
                   },
-                  x: { 
-                    display: chartLayout.showAxisLabels,
-                    grid: {
-                      display: chartStyling.showGridLines,
-                      color: 'rgba(0, 0, 0, 0.1)'
-                    },
-                    ticks: {
-                      font: {
-                        size: 10
-                      }
-                    },
-                    title: {
-                      display: !!chartLayout.xAxisLabel,
-                      text: chartLayout.xAxisLabel
-                    }
+                  title: {
+                    display: !!chartLayout.xAxisLabel,
+                    text: chartLayout.xAxisLabel
                   }
-                }) 
-              : {}
+                }
+              } : {}
             }
 
             // 创建图表实例
@@ -2283,7 +2413,6 @@ const SimpleApp: React.FC = () => {
                                 value={currentChartConfig.dataSeries.xAxis}
                                 onChange={(e) => {
                                   updateCurrentChartConfig('dataSeries', 'xAxis', e.target.value)
-                                  setDataSeries(prev => ({...prev, xAxis: e.target.value}))
                                 }}
                                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                               >
@@ -2299,7 +2428,6 @@ const SimpleApp: React.FC = () => {
                                 value={currentChartConfig.dataSeries.yAxis}
                                 onChange={(e) => {
                                   updateCurrentChartConfig('dataSeries', 'yAxis', e.target.value)
-                                  setDataSeries(prev => ({...prev, yAxis: e.target.value}))
                                 }}
                                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                               >
