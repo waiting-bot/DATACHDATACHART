@@ -1,5 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { Chart } from 'chart.js/auto'
+import DataLabelsPlugin from 'chartjs-plugin-datalabels'
+
+// 注册数据标签插件
+Chart.register(DataLabelsPlugin)
 
 // 图表实例配置接口
 interface ChartInstance {
@@ -53,7 +57,9 @@ const SimpleApp: React.FC = () => {
           legendPosition: 'top',
           showGridLines: true,
           showDataLabels: false,
-          dataLabelFormat: '1位小数'
+          dataLabelFormat: '1位小数',
+          dataLabelPosition: 'center',
+          dataLabelColor: '#ffffff'
         },
         layout: {
           showAxisLabels: true,
@@ -129,7 +135,9 @@ const SimpleApp: React.FC = () => {
           legendPosition: 'top',
           showGridLines: true,
           showDataLabels: false,
-          dataLabelFormat: '1位小数'
+          dataLabelFormat: '1位小数',
+          dataLabelPosition: 'center',
+          dataLabelColor: '#ffffff'
         },
         layout: {
           showAxisLabels: true,
@@ -371,8 +379,174 @@ const SimpleApp: React.FC = () => {
   const canvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({})
   const [activePreviewIndex, setActivePreviewIndex] = useState(0)
   
-  // 个性配置面板状态
-  const [configSection, setConfigSection] = useState<'data' | 'styling' | 'layout' | 'advanced'>('styling')
+  // 抽屉面板状态管理
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false)
+  const [selectedChartForConfig, setSelectedChartForConfig] = useState<string | null>(null)
+  const [drawerConfigSection, setDrawerConfigSection] = useState<'data' | 'styling' | 'layout' | 'advanced'>('styling')
+
+  // 图标和描述函数
+  const getChartIcon = (chartType: string): string => {
+    const icons: Record<string, string> = {
+      'bar': '📊',
+      'line': '📈',
+      'pie': '🥧',
+      'area': '📊',
+      'scatter': '⚡',
+      'doughnut': '🍩',
+      'bar_bar': '📊📊',
+      'line_line': '📈📈',
+      'bar_line': '📊📈',
+      'bar_area': '📊📈',
+      'line_area': '📈📈'
+    }
+    return icons[chartType] || '📊'
+  }
+
+  const getChartDescription = (chartType: string): string => {
+    const descriptions: Record<string, string> = {
+      'bar': '柱状图',
+      'line': '折线图',
+      'pie': '饼图',
+      'area': '面积图',
+      'scatter': '散点图',
+      'doughnut': '环形图',
+      'bar_bar': '双柱图',
+      'line_line': '双折线图',
+      'bar_line': '柱线图',
+      'bar_area': '柱面积图',
+      'line_area': '折线面积图'
+    }
+    return descriptions[chartType] || chartType
+  }
+
+  // 打开配置抽屉
+  const openConfigDrawer = (chartType: string) => {
+    setSelectedChartForConfig(chartType)
+    setIsDrawerOpen(true)
+    
+    // 如果是散点图，自动选择更适合的数据列
+    if (chartType === 'scatter') {
+      const previewData = getPreviewData()
+      const numericColumns = Object.keys(previewData).filter(key => {
+        const values = previewData[key as keyof typeof previewData]
+        return Array.isArray(values) && values.every(val => typeof val === 'number' || !isNaN(parseFloat(val)))
+      })
+      
+      if (numericColumns.length >= 2) {
+        setDataSeries(prev => ({
+          ...prev,
+          xAxis: numericColumns[0],
+          yAxis: numericColumns[1]
+        }))
+      }
+    }
+    
+    // 如果是组合图表，默认显示数据配置
+    if (chartType === 'combination') {
+      setDrawerConfigSection('data')
+    }
+    
+    // 更新当前配置状态为选中图表的配置
+    if (chartConfigs[chartType]) {
+      setCurrentChartConfig(chartConfigs[chartType])
+    } else {
+      // 如果没有配置，使用默认配置
+      const defaultConfig = {
+        dataSeries: {
+          xAxis: dataSeries.xAxis,
+          yAxis: dataSeries.yAxis,
+          yAxis2: ''
+        },
+        styling: {
+          title: chartConfig.title,
+          colorScheme: chartConfig.colorScheme,
+          showLegend: true,
+          legendPosition: 'top',
+          showGridLines: true,
+          showDataLabels: false,
+          dataLabelFormat: '1位小数',
+          dataLabelPosition: 'center',
+          dataLabelColor: '#ffffff'
+        },
+        layout: {
+          showAxisLabels: chartConfig.showAxisLabels,
+          xAxisLabel: '',
+          yAxisLabel: ''
+        }
+      }
+      setCurrentChartConfig(defaultConfig)
+      setChartConfigs(prev => ({...prev, [chartType]: defaultConfig}))
+    }
+  }
+
+  // 关闭配置抽屉
+  const closeConfigDrawer = () => {
+    setIsDrawerOpen(false)
+    setSelectedChartForConfig(null)
+  }
+  
+  // 图表配置状态（每个图表独立配置）
+  const [chartConfigs, setChartConfigs] = useState<Record<string, {
+    dataSeries: {
+      xAxis: string
+      yAxis: string
+      yAxis2?: string
+      additionalYAxes?: Array<{
+        id: string
+        dataKey: string
+        type: 'bar' | 'line' | 'area'
+        color: string
+        position: 'left' | 'right'
+      }>
+    }
+    styling: {
+      title: string
+      colorScheme: string
+      showLegend: boolean
+      legendPosition: 'top' | 'right' | 'bottom' | 'hidden'
+      showGridLines: boolean
+      showDataLabels: boolean
+      dataLabelFormat: '整数' | '1位小数' | '2位小数' | '百分比'
+    }
+    layout: {
+      showAxisLabels: boolean
+      xAxisLabel: string
+      yAxisLabel: string
+    }
+  }>>({})
+  
+  // 初始化图表配置
+  useEffect(() => {
+    const initialConfigs: Record<string, any> = {}
+    selectedChartTypes.forEach(chartType => {
+      if (!chartConfigs[chartType]) {
+        initialConfigs[chartType] = {
+          dataSeries: {
+            xAxis: dataSeries.xAxis,
+            yAxis: dataSeries.yAxis,
+            yAxis2: ''
+          },
+          styling: {
+            title: chartConfig.title,
+            colorScheme: chartConfig.colorScheme,
+            showLegend: true,
+            legendPosition: 'top',
+            showGridLines: true,
+            showDataLabels: false,
+            dataLabelFormat: '1位小数'
+          },
+          layout: {
+            showAxisLabels: chartConfig.showAxisLabels,
+            xAxisLabel: '',
+            yAxisLabel: ''
+          }
+        }
+      }
+    })
+    if (Object.keys(initialConfigs).length > 0) {
+      setChartConfigs(prev => ({...prev, ...initialConfigs}))
+    }
+  }, [selectedChartTypes])
   
   // 当前图表配置状态（基于选中的图表类型）
   const [currentChartConfig, setCurrentChartConfig] = useState({
@@ -406,7 +580,21 @@ const SimpleApp: React.FC = () => {
         [field]: value
       }
     }))
-  }, [])
+    
+    // 同时更新图表配置状态
+    if (selectedChartForConfig) {
+      setChartConfigs(prev => ({
+        ...prev,
+        [selectedChartForConfig]: {
+          ...prev[selectedChartForConfig],
+          [section]: {
+            ...prev[selectedChartForConfig][section as keyof typeof prev[selectedChartForConfig]],
+            [field]: value
+          }
+        }
+      }))
+    }
+  }, [selectedChartForConfig])
   
   // 获取数据系列选项
   const dataOptions = getDataSeriesOptions()
@@ -420,11 +608,7 @@ const SimpleApp: React.FC = () => {
       'area': '面积图',
       'scatter': '散点图',
       'doughnut': '环形图',
-      'bar_bar': '双柱图',
-      'line_line': '双折线图',
-      'bar_line': '柱线图',
-      'bar_area': '柱面积图',
-      'line_area': '折线面积图'
+      'combination': '组合图'
     }
     return typeNames[chartType] || chartType
   }
@@ -521,7 +705,7 @@ const SimpleApp: React.FC = () => {
     })
   }, [chartConfig.colorScheme])
 
-  // 图表实时预览 - 基于选中的图表类型
+  // 图表实时预览 - 支持多图表同时显示
   useEffect(() => {
     if (currentStep !== 'chart_generation' || selectedChartTypes.length === 0) return
 
@@ -532,37 +716,69 @@ const SimpleApp: React.FC = () => {
     const colorSchemes = {
       business_blue_gray: {
         background: 'rgba(59, 130, 246, 0.6)',
-        border: 'rgba(59, 130, 246, 1)'
+        border: 'rgba(59, 130, 246, 1)',
+        secondary: {
+          background: 'rgba(16, 185, 129, 0.6)',
+          border: 'rgba(16, 185, 129, 1)'
+        }
       },
       professional_black_gray: {
         background: 'rgba(75, 85, 99, 0.6)',
-        border: 'rgba(75, 85, 99, 1)'
+        border: 'rgba(75, 85, 99, 1)',
+        secondary: {
+          background: 'rgba(107, 114, 128, 0.6)',
+          border: 'rgba(107, 114, 128, 1)'
+        }
       },
       modern_blue: {
         background: 'rgba(37, 99, 235, 0.6)',
-        border: 'rgba(37, 99, 235, 1)'
+        border: 'rgba(37, 99, 235, 1)',
+        secondary: {
+          background: 'rgba(59, 130, 246, 0.6)',
+          border: 'rgba(59, 130, 246, 1)'
+        }
       },
       elegant_purple: {
         background: 'rgba(147, 51, 234, 0.6)',
-        border: 'rgba(147, 51, 234, 1)'
+        border: 'rgba(147, 51, 234, 1)',
+        secondary: {
+          background: 'rgba(236, 72, 153, 0.6)',
+          border: 'rgba(236, 72, 153, 1)'
+        }
       },
       vibrant_teal_green: {
         background: 'rgba(20, 184, 166, 0.6)',
-        border: 'rgba(20, 184, 166, 1)'
+        border: 'rgba(20, 184, 166, 1)',
+        secondary: {
+          background: 'rgba(34, 197, 94, 0.6)',
+          border: 'rgba(34, 197, 94, 1)'
+        }
       }
     }
 
+    // 清理现有图表
+    Object.keys(chartRefs.current).forEach(chartKey => {
+      if (chartRefs.current[chartKey]) {
+        chartRefs.current[chartKey].destroy()
+        delete chartRefs.current[chartKey]
+      }
+    })
+
     // 为每个选中的图表类型创建图表
-    selectedChartTypes.forEach((chartType, index) => {
+    selectedChartTypes.forEach((chartType) => {
       const canvasId = `chart-canvas-${chartType}`
       const canvas = canvasRefs.current[canvasId]
+      
+      // Canvas调试信息
       
       if (canvas) {
         const ctx = canvas.getContext('2d')
         if (ctx) {
           try {
-            // 使用全局配色方案
-            const colorSchemeName = chartConfig.colorScheme
+            // 使用当前图表的独立配色方案
+            const currentChartConfigs_instance = chartConfigs[chartType] || currentChartConfig
+            
+            const colorSchemeName = currentChartConfigs_instance.styling.colorScheme
             const colors = colorSchemes[colorSchemeName as keyof typeof colorSchemes] || colorSchemes.business_blue_gray
             
             // 根据图表类型调整数据配置
@@ -604,50 +820,102 @@ const SimpleApp: React.FC = () => {
                   }]
                 }
               }
-            } else if (chartType.includes('_')) {
-              // 处理组合图表
-              const [type1, type2] = chartType.split('_')
-              const isDualYAxis = type1 !== type2
+            } else if (chartType === 'combination') {
+              // 处理组合图表 - 默认显示柱状图+折线图
+              const chartConfig_instance = chartConfigs[chartType] || currentChartConfig
+              const additionalYAxes = chartConfig_instance.dataSeries.additionalYAxes || []
               
               let datasets = []
               
-              // 第一个数据系列
+              // 主数据系列（柱状图）
               datasets.push({
                 label: dataSeries.yAxis,
                 data: previewData[dataSeries.yAxis as keyof typeof previewData] || [],
-                backgroundColor: type1 === 'bar' ? colors.background : (type1 === 'area' ? colors.background : 'transparent'),
+                backgroundColor: colors.background,
                 borderColor: colors.border,
-                borderWidth: 2,
-                type: type1 === 'area' ? 'line' : type1,
-                fill: type1 === 'area' ? (type1 === 'area' ? 'origin' : false) : false,
-                tension: type1 === 'area' ? 0.4 : 0,
+                borderWidth: 1,
+                type: 'bar',
                 yAxisID: 'y'
               })
               
-              // 第二个数据系列（如果有第二Y轴数据）
-              const secondYAxis = currentChartConfig?.dataSeries?.yAxis2 || 
-                               (dataOptions.yAxis.length > 1 ? dataOptions.yAxis[1] : null)
-              
-              if (secondYAxis && secondYAxis !== dataSeries.yAxis) {
-                const colors2 = colorSchemes.secondary || colorSchemes.business_blue_gray
-                datasets.push({
-                  label: secondYAxis,
-                  data: previewData[secondYAxis as keyof typeof previewData] || [],
-                  backgroundColor: type2 === 'bar' ? colors2.background : (type2 === 'area' ? colors2.background : 'transparent'),
-                  borderColor: colors2.border,
-                  borderWidth: 2,
-                  type: type2 === 'area' ? 'line' : type2,
-                  fill: type2 === 'area' ? 'origin' : false,
-                  tension: type2 === 'area' ? 0.4 : 0,
-                  yAxisID: isDualYAxis ? 'y1' : 'y'
-                })
+              // 第二数据系列（折线图）
+              if (dataOptions.yAxis.length > 1) {
+                const secondYAxis = dataOptions.yAxis[1]
+                if (secondYAxis !== dataSeries.yAxis) {
+                  datasets.push({
+                    label: secondYAxis,
+                    data: previewData[secondYAxis as keyof typeof previewData] || [],
+                    backgroundColor: 'transparent',
+                    borderColor: colors.secondary?.border || 'rgba(16, 185, 129, 1)',
+                    borderWidth: 2,
+                    type: 'line',
+                    yAxisID: 'y1'
+                  })
+                }
               }
               
+              // 添加额外的Y轴数据系列
+              additionalYAxes.forEach(axis => {
+                datasets.push({
+                  label: axis.dataKey,
+                  data: previewData[axis.dataKey as keyof typeof previewData] || [],
+                  backgroundColor: axis.type === 'bar' ? axis.color : 'transparent',
+                  borderColor: axis.color,
+                  borderWidth: 2,
+                  type: axis.type === 'area' ? 'line' : axis.type,
+                  fill: axis.type === 'area' ? 'origin' : false,
+                  yAxisID: axis.position === 'right' ? 'y1' : 'y'
+                })
+              })
+              
               chartConfig_data = {
-                type: type1,
+                type: 'bar',
                 data: {
                   labels: previewData[dataSeries.xAxis as keyof typeof previewData] || [],
                   datasets: datasets
+                }
+              }
+            } else if (chartType === 'scatter') {
+              // 散点图特殊处理：需要x,y坐标点数据
+              const xData = previewData[dataSeries.xAxis as keyof typeof previewData] || []
+              const yData = previewData[dataSeries.yAxis as keyof typeof previewData] || []
+              
+              // 将x,y数据转换为散点图需要的点数据格式
+              const scatterData = xData.map((xValue: any, index: number) => {
+                const xNum = typeof xValue === 'number' ? xValue : parseFloat(xValue)
+                const yNum = index < yData.length ? (typeof yData[index] === 'number' ? yData[index] : parseFloat(yData[index])) : 0
+                return {
+                  x: isNaN(xNum) ? index : xNum, // 如果x不是数字，使用索引
+                  y: isNaN(yNum) ? 0 : yNum
+                }
+              })
+              
+              chartConfig_data = {
+                type: 'scatter',
+                data: {
+                  datasets: [{
+                    label: `${dataSeries.yAxis} vs ${dataSeries.xAxis}`,
+                    data: scatterData,
+                    backgroundColor: colors.background,
+                    borderColor: colors.border,
+                    borderWidth: 2,
+                    pointRadius: 6,
+                    pointHoverRadius: 8
+                  }]
+                }
+              }
+            } else if (chartType === 'bar') {
+              chartConfig_data = {
+                type: 'bar',
+                data: {
+                  labels: previewData[dataSeries.xAxis as keyof typeof previewData] || [],
+                  datasets: [{
+                    label: dataSeries.yAxis,
+                    data: previewData[dataSeries.yAxis as keyof typeof previewData] || [],
+                    backgroundColor: colors.background,
+                    borderColor: colors.border,
+                    borderWidth: 1
+                  }]
                 }
               }
             } else {
@@ -658,7 +926,7 @@ const SimpleApp: React.FC = () => {
                   datasets: [{
                     label: dataSeries.yAxis,
                     data: previewData[dataSeries.yAxis as keyof typeof previewData] || [],
-                    backgroundColor: colors.background,
+                    backgroundColor: chartType === 'line' ? 'transparent' : colors.background,
                     borderColor: colors.border,
                     borderWidth: 2
                   }]
@@ -666,31 +934,75 @@ const SimpleApp: React.FC = () => {
               }
             }
             
-            // 设置通用选项
+            // 设置通用选项 - 为卡片显示优化
+            // 使用用户个性化设置
+            const chartStyling = currentChartConfigs_instance.styling
+            const chartLayout = currentChartConfigs_instance.layout
+            
             chartConfig_data.options = {
               responsive: true,
               maintainAspectRatio: false,
               plugins: {
                 legend: {
-                  display: chartType !== 'pie' && chartType !== 'doughnut',
-                  position: 'top'
+                  display: chartStyling.showLegend && chartType !== 'pie' && chartType !== 'doughnut',
+                  position: chartStyling.legendPosition,
+                  labels: {
+                    boxWidth: 12,
+                    padding: 8,
+                    font: {
+                      size: 11
+                    }
+                  }
                 },
                 title: {
-                  display: true,
-                  text: `${getChartTypeName(chartType)} - ${chartConfig.title}`
+                  display: !!chartStyling.title,
+                  text: chartStyling.title || `${getChartTypeName(chartType)}`,
+                  font: {
+                    size: 14,
+                    weight: 'bold'
+                  }
+                },
+                datalabels: {
+                  display: chartStyling.showDataLabels,
+                  color: chartStyling.dataLabelColor || '#fff',
+                  anchor: chartStyling.dataLabelPosition || 'center',
+                  font: {
+                    weight: 'bold',
+                    size: 10
+                  },
+                  formatter: (value: number) => {
+                    if (chartStyling.dataLabelFormat === '百分比') {
+                      return `${value}%`;
+                    } else if (chartStyling.dataLabelFormat === '1位小数') {
+                      return value.toFixed(1);
+                    } else if (chartStyling.dataLabelFormat === '2位小数') {
+                      return value.toFixed(2);
+                    } else {
+                      return value.toString();
+                    }
+                  }
                 }
               },
               scales: chartType !== 'pie' && chartType !== 'doughnut' ? 
-                (chartType.includes('_') && chartType !== 'area' ? {
+                (chartType === 'combination' ? {
                   // 组合图表双Y轴配置
                   y: {
                     type: 'linear',
-                    display: true,
+                    display: chartLayout.showAxisLabels,
                     position: 'left',
                     beginAtZero: true,
                     grid: {
-                      display: chartConfig.showAxisLabels,
+                      display: chartStyling.showGridLines,
                       color: 'rgba(0, 0, 0, 0.1)'
+                    },
+                    ticks: {
+                      font: {
+                        size: 10
+                      }
+                    },
+                    title: {
+                      display: !!chartLayout.yAxisLabel,
+                      text: chartLayout.yAxisLabel
                     }
                   },
                   y1: {
@@ -700,27 +1012,62 @@ const SimpleApp: React.FC = () => {
                     beginAtZero: true,
                     grid: {
                       drawOnChartArea: false
+                    },
+                    ticks: {
+                      font: {
+                        size: 10
+                      }
                     }
                   },
                   x: { 
+                    display: chartLayout.showAxisLabels,
                     grid: {
-                      display: chartConfig.showAxisLabels,
+                      display: chartStyling.showGridLines,
                       color: 'rgba(0, 0, 0, 0.1)'
+                    },
+                    ticks: {
+                      font: {
+                        size: 10
+                      }
+                    },
+                    title: {
+                      display: !!chartLayout.xAxisLabel,
+                      text: chartLayout.xAxisLabel
                     }
                   }
                 } : {
                   // 普通图表单Y轴配置
                   y: { 
+                    display: chartLayout.showAxisLabels,
                     beginAtZero: true,
                     grid: {
-                      display: chartConfig.showAxisLabels,
+                      display: chartStyling.showGridLines,
                       color: 'rgba(0, 0, 0, 0.1)'
+                    },
+                    ticks: {
+                      font: {
+                        size: 10
+                      }
+                    },
+                    title: {
+                      display: !!chartLayout.yAxisLabel,
+                      text: chartLayout.yAxisLabel
                     }
                   },
                   x: { 
+                    display: chartLayout.showAxisLabels,
                     grid: {
-                      display: chartConfig.showAxisLabels,
+                      display: chartStyling.showGridLines,
                       color: 'rgba(0, 0, 0, 0.1)'
+                    },
+                    ticks: {
+                      font: {
+                        size: 10
+                      }
+                    },
+                    title: {
+                      display: !!chartLayout.xAxisLabel,
+                      text: chartLayout.xAxisLabel
                     }
                   }
                 }) 
@@ -748,7 +1095,7 @@ const SimpleApp: React.FC = () => {
         }
       })
     }
-  }, [currentStep, selectedChartTypes, dataSeries, chartConfig.colorScheme, chartConfig.title, chartConfig.showAxisLabels])
+  }, [currentStep, selectedChartTypes, dataSeries, chartConfigs])
 
   // 实时访问码验证
   const validateAccessCode = useCallback(async (code: string) => {
@@ -1458,590 +1805,325 @@ const SimpleApp: React.FC = () => {
       case 'chart_generation':
         return (
           <div className="animate-fade-in">
-            <div className="max-w-6xl mx-auto">
+            <div className="max-w-7xl mx-auto">
               {/* 页面标题 */}
               <div className="text-center mb-8">
                 <h2 className="text-2xl font-bold text-gray-800 mb-2">
                   图表配置
                 </h2>
                 <p className="text-sm text-gray-500">
-                  选择图表类型和样式，生成专业的汇报图表
+                  选择图表类型，点击配置按钮进行个性化设置
                 </p>
               </div>
               
-              {/* 配置区域 - 移动端垂直布局 */}
-              <div className={`${isMobile ? 'space-y-6' : 'grid grid-cols-12 gap-6'}`}>
+              {/* 主要内容区域 - 宽敞布局 */}
+              <div className="grid grid-cols-12 gap-8">
                 {/* 左侧图表类型选择面板 */}
-                <div className={isMobile ? '' : 'col-span-12 lg:col-span-4'}>
-                  <div className="professional-card p-6 h-full flex flex-col">
-                    <h3 className="text-lg font-semibold text-gray-800 mb-6 flex-shrink-0">图表类型选择</h3>
+                <div className="col-span-12 lg:col-span-3">
+                  <div className="professional-card p-6 h-full">
+                    <h3 className="text-lg font-semibold text-gray-800 mb-4">图表类型</h3>
                     
-                    {/* 配置内容滚动区域 */}
-                    <div className="flex-1 overflow-y-auto pr-2 -mr-2 space-y-6">
-                    
-                    {/* 智能推荐区域 */}
-                    {recommendedChartTypes.length > 0 && (
-                      <div className="animate-slide-up">
-                        <div className="flex items-center gap-2 mb-3">
-                          <span className="text-sm">🤖</span>
-                          <label className="text-sm font-medium text-gray-700">智能推荐</label>
-                          <span className="text-xs text-gray-500 bg-blue-100 px-2 py-1 rounded animate-pulse-slow">基于数据特征</span>
+                    <div className="space-y-4">
+                      {/* 智能推荐区域 */}
+                      {recommendedChartTypes.length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-sm">🤖</span>
+                            <label className="text-sm font-medium text-gray-700 whitespace-nowrap">智能推荐</label>
+                            <span className="text-[10px] text-blue-500 bg-blue-100 px-1.5 py-0.5 rounded">基于数据</span>
+                          </div>
+                          
+                          <div className="grid grid-cols-2 gap-2">
+                            {recommendedChartTypes.map((type, index) => (
+                              <button
+                                key={`rec-${type}`}
+                                onClick={() => handleChartTypeToggle(type)}
+                                className={`p-2 border rounded-lg text-left transition-all duration-200 ${
+                                  selectedChartTypes.includes(type)
+                                    ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-sm'
+                                    : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div>
+                                    <div className="font-medium text-[11px] leading-tight">
+                                      {getChartTypeName(type)}
+                                    </div>
+                                    <div className="text-[9px] text-gray-500 mt-0.5">推荐</div>
+                                  </div>
+                                  {selectedChartTypes.includes(type) && (
+                                    <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
+                                  )}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* 基础图表区域 */}
+                      <div>
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-sm">📊</span>
+                          <label className="text-sm font-medium text-gray-700 whitespace-nowrap">基础图表</label>
                         </div>
                         
                         <div className="grid grid-cols-2 gap-2">
-                          {recommendedChartTypes.map((type, index) => (
+                          {[
+                            {type: 'bar', name: '柱状图'},
+                            {type: 'line', name: '折线图'},
+                            {type: 'pie', name: '饼图'},
+                            {type: 'area', name: '面积图'},
+                            {type: 'scatter', name: '散点图'},
+                            {type: 'doughnut', name: '环形图'}
+                          ].map((chart) => (
                             <button
-                              key={`rec-${type}`}
-                              onClick={() => handleChartTypeToggle(type)}
-                              className={`p-3 border rounded-lg text-center transition-all duration-200 transform hover:scale-105 ${
-                                selectedChartTypes.includes(type)
-                                  ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-md'
-                                  : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50 hover:shadow-sm'
+                              key={chart.type}
+                              onClick={() => handleChartTypeToggle(chart.type)}
+                              className={`p-2 border rounded-lg text-left transition-all duration-200 ${
+                                selectedChartTypes.includes(chart.type)
+                                  ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-sm'
+                                  : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
                               }`}
-                              style={{ animationDelay: `${index * 50}ms` }}
                             >
-                              <div className="font-medium text-sm">{getChartTypeName(type)}</div>
-                              <div className="text-xs text-gray-500 mt-1 flex items-center justify-center">
-                                <span className="inline-block w-1.5 h-1.5 bg-blue-500 rounded-full mr-1"></span>
-                                推荐
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <div className="font-medium text-[11px] leading-tight">
+                                    {chart.name}
+                                  </div>
+                                  <div className="text-[9px] text-gray-500 mt-0.5">
+                                    {recommendedChartTypes.includes(chart.type) ? '推荐' : '基础'}
+                                  </div>
+                                </div>
+                                {selectedChartTypes.includes(chart.type) && (
+                                  <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
+                                )}
                               </div>
                             </button>
                           ))}
                         </div>
                       </div>
-                    )}
-                    
-                    {/* 基础图表区域 */}
-                    <div className="animate-slide-up" style={{ animationDelay: '0.1s' }}>
-                      <div className="flex items-center gap-2 mb-3">
-                        <span className="text-sm">📊</span>
-                        <label className="text-sm font-medium text-gray-700">基础图表</label>
-                      </div>
                       
-                      <div className="grid grid-cols-2 gap-2">
-                        {[
-                          {type: 'bar', name: '柱状图', icon: '📊'},
-                          {type: 'line', name: '折线图', icon: '📈'},
-                          {type: 'pie', name: '饼图', icon: '🥧'},
-                          {type: 'scatter', name: '散点图', icon: '⚡'},
-                          {type: 'area', name: '面积图', icon: '📊'},
-                          {type: 'radar', name: '雷达图', icon: '🎯'},
-                          {type: 'table', name: '表格', icon: '📋'},
-                          {type: 'doughnut', name: '环形图', icon: '🍩'}
-                        ].map((chart, index) => (
-                          <button
-                            key={chart.type}
-                            onClick={() => handleChartTypeToggle(chart.type)}
-                            className={`p-3 border rounded-lg text-center transition-all duration-200 transform hover:scale-105 ${
-                              selectedChartTypes.includes(chart.type)
-                                ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-md ring-1 ring-blue-200'
-                                : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50 hover:shadow-sm'
-                            }`}
-                            style={{ animationDelay: `${0.1 + index * 30}ms` }}
-                          >
-                            <div className="text-lg mb-1">{chart.icon}</div>
-                            <div className="font-medium text-sm">{chart.name}</div>
-                            <div className="text-xs mt-1">
-                              {recommendedChartTypes.includes(chart.type) ? (
-                                <span className="text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded text-xs">推荐</span>
-                              ) : (
-                                <span className="text-gray-400">基础</span>
-                              )}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    
-                    {/* 组合图表区域 */}
-                    <div className="animate-slide-up" style={{ animationDelay: '0.2s' }}>
-                      <div className="flex items-center gap-2 mb-3">
-                        <span className="text-sm">📈</span>
-                        <label className="text-sm font-medium text-gray-700">组合图表</label>
-                        <span className="text-xs text-orange-500 bg-orange-100 px-2 py-1 rounded">高级</span>
-                      </div>
-                      
-                      <div className="grid grid-cols-2 gap-2">
-                        {[
-                          {type: 'bar_line', name: '柱线图', icon: '📊📈', desc: '柱状+折线'},
-                          {type: 'bar_area', name: '柱面积图', icon: '📊📈', desc: '柱状+面积'},
-                          {type: 'bar_bar', name: '双柱图', icon: '📊📊', desc: '双Y轴'},
-                          {type: 'line_area', name: '折线面积图', icon: '📈📈', desc: '折线+面积'},
-                          {type: 'line_line', name: '双折线图', icon: '📈📈', desc: '双系列'}
-                        ].map((chart, index) => (
-                          <button
-                            key={chart.type}
-                            onClick={() => handleChartTypeToggle(chart.type)}
-                            className={`p-3 border rounded-lg text-center transition-all duration-200 transform hover:scale-105 ${
-                              selectedChartTypes.includes(chart.type)
-                                ? 'border-orange-500 bg-orange-50 text-orange-700 shadow-md ring-1 ring-orange-200'
-                                : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50 hover:shadow-sm'
-                            }`}
-                            style={{ animationDelay: `${0.2 + index * 40}ms` }}
-                          >
-                            <div className="text-sm mb-1">{chart.icon}</div>
-                            <div className="font-medium text-sm">{chart.name}</div>
-                            <div className="text-xs text-gray-500 mt-1">{chart.desc}</div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    
-                    {/* Excel数据解析状态 */}
-                    {isParsingExcel && (
-                      <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-md">
+                      {/* 组合图表区域 */}
+                      <div>
                         <div className="flex items-center gap-2 mb-2">
-                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                          <span className="text-sm font-medium text-blue-700">正在解析Excel数据...</span>
-                        </div>
-                        <p className="text-xs text-blue-600">请稍候，我们正在分析您的数据结构</p>
-                      </div>
-                    )}
-                    
-                    {/* 数据解析错误反馈 */}
-                    {parsingError && (
-                      <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-md">
-                        <div className="flex items-center gap-2 mb-2">
-                          <svg className="h-4 w-4 text-red-600" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                          </svg>
-                          <span className="text-sm font-medium text-red-700">数据解析失败</span>
-                        </div>
-                        <p className="text-xs text-red-600">{parsingError}</p>
-                        <p className="text-xs text-gray-500 mt-1">您仍可以继续使用默认数据进行配置</p>
-                      </div>
-                    )}
-                    
-                    {/* 图表预览错误反馈 */}
-                    {chartPreviewError && (
-                      <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-md">
-                        <div className="flex items-center gap-2 mb-2">
-                          <svg className="h-4 w-4 text-yellow-600" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                          </svg>
-                          <span className="text-sm font-medium text-yellow-700">预览生成失败</span>
-                        </div>
-                        <p className="text-xs text-yellow-600">{chartPreviewError}</p>
-                        <p className="text-xs text-gray-500 mt-1">请检查数据格式或选择其他图表类型</p>
-                      </div>
-                    )}
-                    
-                    {/* 数据解析成功反馈 */}
-                    {excelParsedData && !isParsingExcel && (
-                      <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-md">
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="text-sm">✅</span>
-                          <span className="text-sm font-medium text-green-700">Excel数据解析成功</span>
-                        </div>
-                        <p className="text-xs text-green-600">
-                          检测到 {excelParsedData.chart_data?.raw_data?.columns?.length || 0} 列数据，
-                          已智能推荐数据系列选择
-                        </p>
-                      </div>
-                    )}
-                    
-                    {/* 基础设置 */}
-                    <div className="border-t pt-6">
-                      <div className="flex items-center gap-2 mb-3">
-                        <span className="text-sm">⚙️</span>
-                        <label className="text-sm font-medium text-gray-700">基础设置</label>
-                      </div>
-                      
-                      {/* 图表标题 */}
-                      <div className="mb-4">
-                        <label className="block text-sm text-gray-600 mb-1">图表标题</label>
-                        <input
-                          type="text"
-                          value={chartConfig.title}
-                          onChange={(e) => setChartConfig(prev => ({...prev, title: e.target.value}))}
-                          placeholder="输入图表标题"
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                        />
-                      </div>
-                      
-                      {/* 输出设置 */}
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-sm text-gray-600 mb-1">输出格式</label>
-                          <select 
-                            value={chartConfig.outputFormat}
-                            onChange={(e) => setChartConfig(prev => ({...prev, outputFormat: e.target.value}))}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                          >
-                            <option value="png">PNG</option>
-                            <option value="svg">SVG</option>
-                            <option value="jpg">JPG</option>
-                          </select>
+                          <span className="text-sm">📈</span>
+                          <label className="text-sm font-medium text-gray-700 whitespace-nowrap">组合图表</label>
+                          <span className="text-[10px] text-orange-500 bg-orange-100 px-1.5 py-0.5 rounded">高级</span>
                         </div>
                         
-                        <div>
-                          <label className="block text-sm text-gray-600 mb-1">分辨率</label>
-                          <select 
-                            value={chartConfig.resolution}
-                            onChange={(e) => setChartConfig(prev => ({...prev, resolution: e.target.value}))}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                          >
-                            <option value="150dpi">150 DPI</option>
-                            <option value="300dpi">300 DPI</option>
-                            <option value="600dpi">600 DPI</option>
-                          </select>
+                        <button
+                          onClick={() => handleChartTypeToggle('combination')}
+                          className={`w-full p-2 border rounded-lg text-left transition-all duration-200 ${
+                            selectedChartTypes.includes('combination')
+                              ? 'border-orange-500 bg-orange-50 text-orange-700 shadow-sm'
+                              : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="pr-1">
+                              <div className="font-medium text-[11px] leading-tight whitespace-nowrap">
+                                组合图
+                              </div>
+                              <div className="text-[9px] text-gray-500 mt-0.5 whitespace-nowrap">多Y轴组合</div>
+                            </div>
+                            {selectedChartTypes.includes('combination') && (
+                              <span className="w-1.5 h-1.5 bg-orange-500 rounded-full flex-shrink-0"></span>
+                            )}
+                          </div>
+                        </button>
+                      </div>
+                      
+                      {/* 基础设置 */}
+                      <div className="border-t pt-4">
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-xs text-gray-600 mb-1">图表标题</label>
+                            <input
+                              type="text"
+                              value={chartConfig.title}
+                              onChange={(e) => setChartConfig(prev => ({...prev, title: e.target.value}))}
+                              placeholder="输入图表标题"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 text-xs"
+                            />
+                          </div>
+                          
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-xs text-gray-600 mb-1">输出格式</label>
+                              <select 
+                                value={chartConfig.outputFormat}
+                                onChange={(e) => setChartConfig(prev => ({...prev, outputFormat: e.target.value}))}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 text-xs"
+                              >
+                                <option value="png">PNG</option>
+                                <option value="svg">SVG</option>
+                                <option value="jpg">JPG</option>
+                              </select>
+                            </div>
+                            
+                            <div>
+                              <label className="block text-xs text-gray-600 mb-1">分辨率</label>
+                              <select 
+                                value={chartConfig.resolution}
+                                onChange={(e) => setChartConfig(prev => ({...prev, resolution: e.target.value}))}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 text-xs"
+                              >
+                                <option value="150dpi">150 DPI</option>
+                                <option value="300dpi">300 DPI</option>
+                                <option value="600dpi">600 DPI</option>
+                              </select>
+                            </div>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                    
                     </div>
                   </div>
                 </div>
                 
-                {/* 右侧图表操作区域 */}
-                <div className={isMobile ? '' : 'col-span-12 lg:col-span-8'}>
-                  <div className="professional-card p-6 h-full flex flex-col">
-                    {/* 图表类型标签切换 */}
-                    <div className="mb-6 flex-shrink-0">
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-lg font-semibold text-gray-800">图表预览</h3>
-                        <span className="text-sm text-gray-500">
-                          已选择 {selectedChartTypes.length} 个图表类型
-                        </span>
-                      </div>
-                      
-                      {/* 图表类型标签 */}
-                      {selectedChartTypes.length > 0 ? (
-                        <div className="flex flex-wrap gap-2">
+                {/* 主要内容区域 - 默认推荐图表显示 */}
+                <div className="col-span-12 lg:col-span-9">
+                  <div className="space-y-6">
+                    {/* 已选择的图表概览 */}
+                    {selectedChartTypes.length > 0 ? (
+                      <div className="professional-card p-6">
+                        <div className="flex items-center justify-between mb-6">
+                          <h3 className="text-lg font-semibold text-gray-800">
+                            已选择图表 ({selectedChartTypes.length})
+                          </h3>
+                          <span className="text-sm text-gray-500">
+                            点击配置按钮进行个性化设置
+                          </span>
+                        </div>
+                        
+                        {/* 图表卡片网格 */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                           {selectedChartTypes.map((chartType, index) => (
-                            <button
-                              key={chartType}
-                              onClick={() => setActivePreviewIndex(index)}
-                              className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-300 transform hover:scale-105 relative overflow-hidden group ${
-                                activePreviewIndex === index
-                                  ? 'bg-primary-600 text-white shadow-lg ring-2 ring-primary-300'
-                                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 hover:shadow-md'
-                              }`}
-                            >
-                              <span className="relative z-10 flex items-center">
-                                {getChartTypeName(chartType)}
-                                {activePreviewIndex === index && (
-                                  <span className="ml-2 animate-pulse">●</span>
-                                )}
-                              </span>
-                              {activePreviewIndex === index && (
-                                <div className="absolute inset-0 bg-gradient-to-r from-primary-600 to-primary-700 animate-pulse-slow"></div>
-                              )}
-                              {!activePreviewIndex === index && (
-                                <div className="absolute inset-0 bg-gradient-to-r from-gray-100 to-gray-200 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                              )}
-                            </button>
+                            <div key={chartType} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                              <div className="space-y-4">
+                                {/* 图表头部信息 */}
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-lg">{getChartIcon(chartType)}</span>
+                                    <div>
+                                      <h4 className="font-medium text-gray-800">
+                                        {getChartTypeName(chartType)}
+                                      </h4>
+                                      <p className="text-xs text-gray-500">
+                                        {dataSeries.xAxis} vs {dataSeries.yAxis}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <button
+                                    onClick={() => openConfigDrawer(chartType)}
+                                    className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                    title="配置图表"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                    </svg>
+                                  </button>
+                                </div>
+                                
+                                {/* 图表预览 */}
+                                <div className="h-48 bg-gradient-to-br from-gray-50 to-white rounded-lg border-2 border-dashed border-gray-200 flex items-center justify-center">
+                                  <canvas
+                                    ref={(el) => {
+                                      canvasRefs.current[`chart-canvas-${chartType}`] = el
+                                    }}
+                                    className="w-full h-full p-2"
+                                    id={`chart-canvas-${chartType}`}
+                                  ></canvas>
+                                </div>
+                                
+                                {/* 快速配置选项 */}
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between text-xs">
+                                    <span className="text-gray-600">配色方案:</span>
+                                    <select
+                                      value={chartConfig.colorScheme}
+                                      onChange={(e) => {
+                                        setChartConfig(prev => ({...prev, colorScheme: e.target.value}))
+                                      }}
+                                      className="text-xs border border-gray-300 rounded px-2 py-1"
+                                    >
+                                      <option value="business_blue_gray">商务蓝灰</option>
+                                      <option value="professional_black_gray">专业黑灰</option>
+                                      <option value="modern_blue">现代蓝色</option>
+                                    </select>
+                                  </div>
+                                  
+                                  {chartType.includes('_') && (
+                                    <div className="flex items-center justify-between text-xs">
+                                      <span className="text-gray-600">第二Y轴:</span>
+                                      <select
+                                        value={currentChartConfig.dataSeries.yAxis2 || ''}
+                                        onChange={(e) => updateCurrentChartConfig('dataSeries', 'yAxis2', e.target.value)}
+                                        className="text-xs border border-gray-300 rounded px-2 py-1"
+                                      >
+                                        <option value="">无</option>
+                                        {dataOptions.yAxis
+                                          .filter(option => option !== currentChartConfig.dataSeries.yAxis)
+                                          .map(option => (
+                                            <option key={option} value={option}>{option}</option>
+                                          ))}
+                                      </select>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
                           ))}
                         </div>
-                      ) : (
-                        <div className="text-center py-4 text-gray-500 text-sm animate-pulse">
-                          <span className="inline-block mr-2">📊</span>
-                          请在左侧选择图表类型
-                        </div>
-                      )}
-                    </div>
-                    
-                    {/* 单图表预览区域 */}
-                    <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6 flex-1">
-                      {selectedChartTypes.length > 0 && activePreviewIndex < selectedChartTypes.length ? (
-                        <div className="space-y-4">
-                          {/* 当前图表信息 */}
-                          <div className="text-center">
-                            <h4 className="text-lg font-semibold text-gray-800">
-                              {getChartTypeName(selectedChartTypes[activePreviewIndex])} 预览
-                            </h4>
-                            <p className="text-sm text-gray-500 mt-1">
-                              {chartConfig.title} · {dataSeries.xAxis} vs {dataSeries.yAxis}
+                      </div>
+                    ) : (
+                      <>
+                      {/* 默认推荐图表显示 */}
+                      <div className="professional-card p-8">
+                        <div className="text-center">
+                          <div className="mb-6">
+                            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                              <span className="text-2xl text-blue-600">📊</span>
+                            </div>
+                            <h3 className="text-xl font-semibold text-gray-800 mb-2">
+                              选择图表类型开始配置
+                            </h3>
+                            <p className="text-gray-500">
+                              从左侧选择基础图表或组合图表，系统将自动生成预览
                             </p>
                           </div>
                           
-                          {/* 图表预览区域 */}
-                          <div className="relative h-96 w-full bg-gradient-to-br from-gray-50 to-white rounded-lg border-2 border-dashed border-gray-200 overflow-hidden">
-                            {selectedChartTypes.map((chartType, index) => (
-                              <div
-                                key={chartType}
-                                className={`absolute inset-0 transition-all duration-300 ease-in-out ${
-                                  activePreviewIndex === index 
-                                    ? 'opacity-100 scale-100' 
-                                    : 'opacity-0 scale-95 pointer-events-none'
-                                }`}
-                              >
-                                <canvas
-                                  ref={(el) => {
-                                    canvasRefs.current[`chart-canvas-${chartType}`] = el
-                                  }}
-                                  className="w-full h-full p-2"
-                                  id={`chart-canvas-${chartType}`}
-                                ></canvas>
+                          {/* 快速开始推荐 */}
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-8">
+                            {recommendedChartTypes.slice(0, 3).map((type, index) => (
+                              <div key={type} className="border border-gray-200 rounded-lg p-4 hover:border-blue-300 transition-colors cursor-pointer"
+                                   onClick={() => handleChartTypeToggle(type)}>
+                                <div className="text-center">
+                                  <div className="text-2xl mb-2">{getChartIcon(type)}</div>
+                                  <h4 className="font-medium text-gray-800">{getChartTypeName(type)}</h4>
+                                  <p className="text-xs text-gray-500 mt-1">推荐图表</p>
+                                </div>
                               </div>
                             ))}
                           </div>
                         </div>
-                      ) : (
-                        <div className="text-center py-12">
-                          <div className={`bg-gray-100 rounded-lg flex items-center justify-center mx-auto mb-4 ${
-                            isMobile ? 'w-12 h-12' : 'w-16 h-16'
-                          }`}>
-                            <span className={`text-gray-400 ${isMobile ? 'text-lg' : 'text-xl'}`}>📊</span>
-                          </div>
-                          <p className={`text-gray-500 ${isMobile ? 'text-sm' : ''}`}>请在左侧选择图表类型</p>
-                        </div>
-                      )}
-                    </div>
-                    
-                    {/* 单图表操作区域 */}
-                    <div className="bg-gray-50 rounded-lg p-4 mb-6">
-                      <h4 className="text-sm font-medium text-gray-800 mb-3">
-                        {selectedChartTypes[activePreviewIndex] ? getChartTypeName(selectedChartTypes[activePreviewIndex]) + ' 个性配置' : '图表配置'}
-                      </h4>
-                      
-                      {/* 配置标签切换 */}
-                      <div className="flex gap-2 mb-4">
-                        {[
-                          { id: 'styling', name: '样式设置', icon: '🎨' },
-                          { id: 'data', name: '数据系列', icon: '📊' },
-                          { id: 'layout', name: '布局选项', icon: '⚙️' },
-                          { id: 'advanced', name: '高级设置', icon: '🔧' }
-                        ].map((tab) => (
-                          <button
-                            key={tab.id}
-                            onClick={() => setConfigSection(tab.id as any)}
-                            className={`flex-1 px-3 py-2 text-xs font-medium rounded-lg transition-colors ${
-                              configSection === tab.id
-                                ? 'bg-white border-primary-500 text-primary-700 border shadow-sm'
-                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                            }`}
-                          >
-                            <span className="mr-1">{tab.icon}</span>
-                            {tab.name}
-                          </button>
-                        ))}
                       </div>
-                      
-                      {/* 配置内容 */}
-                      <div className="bg-white rounded-lg p-4 border border-gray-200">
-                        {configSection === 'styling' && (
-                          <div className="space-y-4">
-                            {/* 图表标题 */}
-                            <div>
-                              <label className="block text-xs text-gray-600 mb-1">图表标题</label>
-                              <input
-                                type="text"
-                                value={currentChartConfig.styling.title}
-                                onChange={(e) => updateCurrentChartConfig('styling', 'title', e.target.value)}
-                                className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
-                                placeholder="输入图表标题"
-                              />
-                            </div>
-                            
-                            {/* 配色方案 */}
-                            <div>
-                              <label className="block text-xs text-gray-600 mb-1">配色方案</label>
-                              <select
-                                value={currentChartConfig.styling.colorScheme}
-                                onChange={(e) => {
-                                  updateCurrentChartConfig('styling', 'colorScheme', e.target.value)
-                                  setChartConfig(prev => ({...prev, colorScheme: e.target.value}))
-                                }}
-                                className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
-                              >
-                                <option value="business_blue_gray">商务蓝灰</option>
-                                <option value="professional_black_gray">专业黑灰</option>
-                                <option value="modern_blue">现代蓝色</option>
-                                <option value="elegant_purple">优雅紫色</option>
-                                <option value="vibrant_teal_green">活力青绿</option>
-                              </select>
-                            </div>
-                            
-                            {/* 图例设置 */}
-                            <div className="grid grid-cols-2 gap-3">
-                              <div>
-                                <label className="block text-xs text-gray-600 mb-1">显示图例</label>
-                                <select
-                                  value={currentChartConfig.styling.showLegend.toString()}
-                                  onChange={(e) => updateCurrentChartConfig('styling', 'showLegend', e.target.value === 'true')}
-                                  className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
-                                >
-                                  <option value="true">显示</option>
-                                  <option value="false">隐藏</option>
-                                </select>
-                              </div>
-                              {currentChartConfig.styling.showLegend && (
-                                <div>
-                                  <label className="block text-xs text-gray-600 mb-1">图例位置</label>
-                                  <select
-                                    value={currentChartConfig.styling.legendPosition}
-                                    onChange={(e) => updateCurrentChartConfig('styling', 'legendPosition', e.target.value)}
-                                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
-                                  >
-                                    <option value="top">顶部</option>
-                                    <option value="right">右侧</option>
-                                    <option value="bottom">底部</option>
-                                  </select>
-                                </div>
-                              )}
-                            </div>
-                            
-                            {/* 网格线设置 */}
-                            <div>
-                              <label className="flex items-center text-xs text-gray-600">
-                                <input
-                                  type="checkbox"
-                                  checked={currentChartConfig.styling.showGridLines}
-                                  onChange={(e) => updateCurrentChartConfig('styling', 'showGridLines', e.target.checked)}
-                                  className="mr-2 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                                />
-                                显示网格线
-                              </label>
-                            </div>
-                          </div>
-                        )}
-                        
-                        {configSection === 'data' && (
-                          <div className="space-y-4">
-                            {/* X轴数据 */}
-                            <div>
-                              <label className="block text-xs text-gray-600 mb-1">X轴数据</label>
-                              <select
-                                value={currentChartConfig.dataSeries.xAxis}
-                                onChange={(e) => {
-                                  updateCurrentChartConfig('dataSeries', 'xAxis', e.target.value)
-                                  setDataSeries(prev => ({...prev, xAxis: e.target.value}))
-                                }}
-                                className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
-                              >
-                                {dataOptions.xAxis.map(option => (
-                                  <option key={option} value={option}>{option}</option>
-                                ))}
-                              </select>
-                            </div>
-                            
-                            {/* Y轴数据 */}
-                            <div>
-                              <label className="block text-xs text-gray-600 mb-1">Y轴数据</label>
-                              <select
-                                value={currentChartConfig.dataSeries.yAxis}
-                                onChange={(e) => {
-                                  updateCurrentChartConfig('dataSeries', 'yAxis', e.target.value)
-                                  setDataSeries(prev => ({...prev, yAxis: e.target.value}))
-                                }}
-                                className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
-                              >
-                                {dataOptions.yAxis.map(option => (
-                                  <option key={option} value={option}>{option}</option>
-                                ))}
-                              </select>
-                            </div>
-                            
-                            {/* 组合图表第二Y轴 */}
-                            {(selectedChartTypes[activePreviewIndex]?.includes('_') || 
-                              selectedChartTypes[activePreviewIndex] === 'bar_line' || 
-                              selectedChartTypes[activePreviewIndex] === 'bar_area') && (
-                              <div>
-                                <label className="block text-xs text-gray-600 mb-1">第二Y轴数据（可选）</label>
-                                <select
-                                  value={currentChartConfig.dataSeries.yAxis2}
-                                  onChange={(e) => updateCurrentChartConfig('dataSeries', 'yAxis2', e.target.value)}
-                                  className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
-                                >
-                                  <option value="">无</option>
-                                  {dataOptions.yAxis
-                                    .filter(option => option !== currentChartConfig.dataSeries.yAxis)
-                                    .map(option => (
-                                      <option key={option} value={option}>{option}</option>
-                                    ))}
-                                </select>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                        
-                        {configSection === 'layout' && (
-                          <div className="space-y-4">
-                            {/* 坐标轴标签 */}
-                            <div>
-                              <label className="flex items-center text-xs text-gray-600 mb-2">
-                                <input
-                                  type="checkbox"
-                                  checked={currentChartConfig.layout.showAxisLabels}
-                                  onChange={(e) => {
-                                    updateCurrentChartConfig('layout', 'showAxisLabels', e.target.checked)
-                                    setChartConfig(prev => ({...prev, showAxisLabels: e.target.checked}))
-                                  }}
-                                  className="mr-2 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                                />
-                                显示坐标轴标签
-                              </label>
-                            </div>
-                            
-                            {currentChartConfig.layout.showAxisLabels && (
-                              <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                  <label className="block text-xs text-gray-600 mb-1">X轴标签</label>
-                                  <input
-                                    type="text"
-                                    value={currentChartConfig.layout.xAxisLabel}
-                                    onChange={(e) => updateCurrentChartConfig('layout', 'xAxisLabel', e.target.value)}
-                                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
-                                    placeholder="X轴名称"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="block text-xs text-gray-600 mb-1">Y轴标签</label>
-                                  <input
-                                    type="text"
-                                    value={currentChartConfig.layout.yAxisLabel}
-                                    onChange={(e) => updateCurrentChartConfig('layout', 'yAxisLabel', e.target.value)}
-                                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
-                                    placeholder="Y轴名称"
-                                  />
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                        
-                        {configSection === 'advanced' && (
-                          <div className="space-y-4">
-                            {/* 数据标签 */}
-                            <div>
-                              <label className="flex items-center text-xs text-gray-600 mb-2">
-                                <input
-                                  type="checkbox"
-                                  checked={currentChartConfig.styling.showDataLabels}
-                                  onChange={(e) => updateCurrentChartConfig('styling', 'showDataLabels', e.target.checked)}
-                                  className="mr-2 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                                />
-                                显示数据标签
-                              </label>
-                            </div>
-                            
-                            {currentChartConfig.styling.showDataLabels && (
-                              <div>
-                                <label className="block text-xs text-gray-600 mb-1">数据格式</label>
-                                <select
-                                  value={currentChartConfig.styling.dataLabelFormat}
-                                  onChange={(e) => updateCurrentChartConfig('styling', 'dataLabelFormat', e.target.value)}
-                                  className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
-                                >
-                                  <option value="整数">整数</option>
-                                  <option value="1位小数">1位小数</option>
-                                  <option value="2位小数">2位小数</option>
-                                  <option value="百分比">百分比</option>
-                                </select>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                      </>
+                    )}
                     
-                    {/* 操作按钮 - 固定在卡片底部 */}
-                    <div className={`mt-auto flex gap-3 ${isMobile ? 'flex-col' : 'flex-col sm:flex-row'} flex-shrink-0`}>
+                    {/* 操作按钮区域 */}
+                    <div className="flex gap-4 justify-end">
+                      <button
+                        onClick={() => setCurrentStep('file_upload')}
+                        className="professional-btn professional-btn-secondary"
+                      >
+                        返回上传
+                      </button>
                       <button
                         onClick={handleGenerateCharts}
                         disabled={isLoading || selectedChartTypes.length === 0}
-                        className={`professional-btn professional-btn-primary flex-1 ${isMobile ? 'py-4' : ''}`}
+                        className="professional-btn professional-btn-primary"
                       >
                         {isLoading ? (
                           <>
@@ -2052,17 +2134,445 @@ const SimpleApp: React.FC = () => {
                           `生成 ${selectedChartTypes.length} 个图表`
                         )}
                       </button>
-                      <button
-                        onClick={() => setCurrentStep('file_upload')}
-                        className={`professional-btn professional-btn-secondary ${isMobile ? 'py-4' : ''}`}
-                      >
-                        返回上传
-                      </button>
                     </div>
                   </div>
                 </div>
               </div>
             </div>
+            
+            {/* 抽屉式配置面板 */}
+            {isDrawerOpen && selectedChartForConfig && (
+              <div className="fixed inset-0 z-50 overflow-hidden">
+                {/* 背景遮罩 */}
+                <div 
+                  className="absolute inset-0 bg-black bg-opacity-50 transition-opacity"
+                  onClick={closeConfigDrawer}
+                ></div>
+                
+                {/* 抽屉面板 */}
+                <div className="absolute inset-y-0 right-0 max-w-full w-96 bg-white shadow-xl transform transition-transform">
+                  <div className="h-full flex flex-col">
+                    {/* 抽屉头部 */}
+                    <div className="flex items-center justify-between p-6 border-b border-gray-200">
+                      <div className="flex items-center gap-3">
+                        <span className="text-xl">{getChartIcon(selectedChartForConfig)}</span>
+                        <div>
+                          <h3 className="text-lg font-semibold text-gray-800">
+                            {getChartTypeName(selectedChartForConfig)} 配置
+                          </h3>
+                          <p className="text-sm text-gray-500">
+                            {dataSeries.xAxis} vs {dataSeries.yAxis}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={closeConfigDrawer}
+                        className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                      </button>
+                    </div>
+                    
+                    {/* 配置内容区域 */}
+                    <div className="flex-1 overflow-y-auto p-6">
+                      {/* 配置标签切换 */}
+                      <div className="flex gap-2 mb-6">
+                        {[
+                          { id: 'styling', name: '样式设置', icon: '🎨' },
+                          { id: 'data', name: '数据系列', icon: '📊' },
+                          { id: 'layout', name: '布局选项', icon: '⚙️' },
+                          { id: 'advanced', name: '高级设置', icon: '🔧' }
+                        ].map((tab) => (
+                          <button
+                            key={tab.id}
+                            onClick={() => setDrawerConfigSection(tab.id as any)}
+                            className={`flex-1 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                              drawerConfigSection === tab.id
+                                ? 'bg-blue-50 border-blue-500 text-blue-700 border shadow-sm'
+                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                            }`}
+                          >
+                            <span className="mr-1">{tab.icon}</span>
+                            {tab.name}
+                          </button>
+                        ))}
+                      </div>
+                      
+                      {/* 配置内容 */}
+                      <div className="space-y-6">
+                        {drawerConfigSection === 'styling' && (
+                          <div className="space-y-4">
+                            <div>
+                              <label className="block text-sm text-gray-700 mb-2">图表标题</label>
+                              <input
+                                type="text"
+                                value={currentChartConfig.styling.title}
+                                onChange={(e) => updateCurrentChartConfig('styling', 'title', e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                placeholder="输入图表标题"
+                              />
+                            </div>
+                            
+                            <div>
+                              <label className="block text-sm text-gray-700 mb-2">配色方案</label>
+                              <select
+                                value={currentChartConfig.styling.colorScheme}
+                                onChange={(e) => {
+                                  updateCurrentChartConfig('styling', 'colorScheme', e.target.value)
+                                }}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              >
+                                <option value="business_blue_gray">商务蓝灰</option>
+                                <option value="professional_black_gray">专业黑灰</option>
+                                <option value="modern_blue">现代蓝色</option>
+                                <option value="elegant_purple">优雅紫色</option>
+                                <option value="vibrant_teal_green">活力青绿</option>
+                              </select>
+                            </div>
+                            
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-sm text-gray-700 mb-2">显示图例</label>
+                                <select
+                                  value={currentChartConfig.styling.showLegend.toString()}
+                                  onChange={(e) => updateCurrentChartConfig('styling', 'showLegend', e.target.value === 'true')}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                >
+                                  <option value="true">显示</option>
+                                  <option value="false">隐藏</option>
+                                </select>
+                              </div>
+                              
+                              {currentChartConfig.styling.showLegend && (
+                                <div>
+                                  <label className="block text-sm text-gray-700 mb-2">图例位置</label>
+                                  <select
+                                    value={currentChartConfig.styling.legendPosition}
+                                    onChange={(e) => updateCurrentChartConfig('styling', 'legendPosition', e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                  >
+                                    <option value="top">顶部</option>
+                                    <option value="right">右侧</option>
+                                    <option value="bottom">底部</option>
+                                  </select>
+                                </div>
+                              )}
+                            </div>
+                            
+                            <div>
+                              <label className="flex items-center text-sm text-gray-700">
+                                <input
+                                  type="checkbox"
+                                  checked={currentChartConfig.styling.showGridLines}
+                                  onChange={(e) => updateCurrentChartConfig('styling', 'showGridLines', e.target.checked)}
+                                  className="mr-2 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                />
+                                显示网格线
+                              </label>
+                            </div>
+                          </div>
+                        )}
+                        
+                        {drawerConfigSection === 'data' && (
+                          <div className="space-y-4">
+                            <div>
+                              <label className="block text-sm text-gray-700 mb-2">X轴数据</label>
+                              <select
+                                value={currentChartConfig.dataSeries.xAxis}
+                                onChange={(e) => {
+                                  updateCurrentChartConfig('dataSeries', 'xAxis', e.target.value)
+                                  setDataSeries(prev => ({...prev, xAxis: e.target.value}))
+                                }}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              >
+                                {dataOptions.xAxis.map(option => (
+                                  <option key={option} value={option}>{option}</option>
+                                ))}
+                              </select>
+                            </div>
+                            
+                            <div>
+                              <label className="block text-sm text-gray-700 mb-2">Y轴数据</label>
+                              <select
+                                value={currentChartConfig.dataSeries.yAxis}
+                                onChange={(e) => {
+                                  updateCurrentChartConfig('dataSeries', 'yAxis', e.target.value)
+                                  setDataSeries(prev => ({...prev, yAxis: e.target.value}))
+                                }}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              >
+                                {dataOptions.yAxis.map(option => (
+                                  <option key={option} value={option}>{option}</option>
+                                ))}
+                              </select>
+                            </div>
+                            
+                            {/* 组合图表多Y轴配置 */}
+                            {selectedChartForConfig === 'combination' && (
+                              <div className="space-y-4">
+                                <div>
+                                  <label className="block text-sm text-gray-700 mb-2">第二Y轴数据</label>
+                                  <select
+                                    value={currentChartConfig.dataSeries.yAxis2 || ''}
+                                    onChange={(e) => updateCurrentChartConfig('dataSeries', 'yAxis2', e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                  >
+                                    <option value="">无</option>
+                                    {dataOptions.yAxis
+                                      .filter(option => option !== currentChartConfig.dataSeries.yAxis)
+                                      .map(option => (
+                                        <option key={option} value={option}>{option}</option>
+                                      ))}
+                                  </select>
+                                </div>
+                                
+                                <div className="border-t pt-4">
+                                  <div className="flex items-center justify-between mb-4">
+                                    <label className="block text-sm font-medium text-gray-700">高级Y轴配置</label>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        // 添加新的Y轴配置
+                                        const newYAxis = {
+                                          id: `yaxis_${Date.now()}`,
+                                          dataKey: dataOptions.yAxis.find(opt => opt !== currentChartConfig.dataSeries.yAxis && opt !== currentChartConfig.dataSeries.yAxis2) || '',
+                                          type: 'line' as const,
+                                          color: `rgba(${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, 0.8)`,
+                                          position: 'right' as const
+                                        }
+                                        const currentAdditional = currentChartConfig.dataSeries.additionalYAxes || []
+                                        updateCurrentChartConfig('dataSeries', 'additionalYAxes', [...currentAdditional, newYAxis])
+                                      }}
+                                      className="px-3 py-1 bg-blue-500 text-white text-sm rounded hover:bg-blue-600"
+                                    >
+                                      添加Y轴
+                                    </button>
+                                  </div>
+                                  
+                                  {/* 额外的Y轴配置列表 */}
+                                  {currentChartConfig.dataSeries.additionalYAxes?.map((axis, index) => (
+                                    <div key={axis.id} className="border rounded p-3 mb-3">
+                                      <div className="flex items-center justify-between mb-2">
+                                        <span className="text-sm font-medium">Y轴 {index + 2}</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const currentAdditional = currentChartConfig.dataSeries.additionalYAxes || []
+                                            updateCurrentChartConfig('dataSeries', 'additionalYAxes', currentAdditional.filter(a => a.id !== axis.id))
+                                          }}
+                                          className="text-red-500 hover:text-red-700"
+                                        >
+                                          删除
+                                        </button>
+                                      </div>
+                                      
+                                      <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                          <label className="block text-xs text-gray-600 mb-1">数据</label>
+                                          <select
+                                            value={axis.dataKey}
+                                            onChange={(e) => {
+                                              const currentAdditional = currentChartConfig.dataSeries.additionalYAxes || []
+                                              const updated = currentAdditional.map(a => 
+                                                a.id === axis.id ? {...a, dataKey: e.target.value} : a
+                                              )
+                                              updateCurrentChartConfig('dataSeries', 'additionalYAxes', updated)
+                                            }}
+                                            className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                                          >
+                                            {dataOptions.yAxis
+                                              .filter(option => option !== currentChartConfig.dataSeries.yAxis && option !== currentChartConfig.dataSeries.yAxis2)
+                                              .map(option => (
+                                                <option key={option} value={option}>{option}</option>
+                                              ))}
+                                          </select>
+                                        </div>
+                                        
+                                        <div>
+                                          <label className="block text-xs text-gray-600 mb-1">类型</label>
+                                          <select
+                                            value={axis.type}
+                                            onChange={(e) => {
+                                              const currentAdditional = currentChartConfig.dataSeries.additionalYAxes || []
+                                              const updated = currentAdditional.map(a => 
+                                                a.id === axis.id ? {...a, type: e.target.value as 'bar' | 'line' | 'area'} : a
+                                              )
+                                              updateCurrentChartConfig('dataSeries', 'additionalYAxes', updated)
+                                            }}
+                                            className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                                          >
+                                            <option value="bar">柱状</option>
+                                            <option value="line">折线</option>
+                                            <option value="area">面积</option>
+                                          </select>
+                                        </div>
+                                        
+                                        <div>
+                                          <label className="block text-xs text-gray-600 mb-1">颜色</label>
+                                          <input
+                                            type="color"
+                                            value={axis.color}
+                                            onChange={(e) => {
+                                              const currentAdditional = currentChartConfig.dataSeries.additionalYAxes || []
+                                              const updated = currentAdditional.map(a => 
+                                                a.id === axis.id ? {...a, color: e.target.value} : a
+                                              )
+                                              updateCurrentChartConfig('dataSeries', 'additionalYAxes', updated)
+                                            }}
+                                            className="w-full h-8 border border-gray-300 rounded text-xs"
+                                          />
+                                        </div>
+                                        
+                                        <div>
+                                          <label className="block text-xs text-gray-600 mb-1">位置</label>
+                                          <select
+                                            value={axis.position}
+                                            onChange={(e) => {
+                                              const currentAdditional = currentChartConfig.dataSeries.additionalYAxes || []
+                                              const updated = currentAdditional.map(a => 
+                                                a.id === axis.id ? {...a, position: e.target.value as 'left' | 'right'} : a
+                                              )
+                                              updateCurrentChartConfig('dataSeries', 'additionalYAxes', updated)
+                                            }}
+                                            className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                                          >
+                                            <option value="left">左侧</option>
+                                            <option value="right">右侧</option>
+                                          </select>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        
+                        {drawerConfigSection === 'layout' && (
+                          <div className="space-y-4">
+                            <div>
+                              <label className="flex items-center text-sm text-gray-700">
+                                <input
+                                  type="checkbox"
+                                  checked={currentChartConfig.layout.showAxisLabels}
+                                  onChange={(e) => {
+                                    updateCurrentChartConfig('layout', 'showAxisLabels', e.target.checked)
+                                  }}
+                                  className="mr-2 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                />
+                                显示坐标轴标签
+                              </label>
+                            </div>
+                            
+                            {currentChartConfig.layout.showAxisLabels && (
+                              <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                  <label className="block text-sm text-gray-700 mb-2">X轴标签</label>
+                                  <input
+                                    type="text"
+                                    value={currentChartConfig.layout.xAxisLabel}
+                                    onChange={(e) => updateCurrentChartConfig('layout', 'xAxisLabel', e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    placeholder="X轴名称"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-sm text-gray-700 mb-2">Y轴标签</label>
+                                  <input
+                                    type="text"
+                                    value={currentChartConfig.layout.yAxisLabel}
+                                    onChange={(e) => updateCurrentChartConfig('layout', 'yAxisLabel', e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    placeholder="Y轴名称"
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        
+                        {drawerConfigSection === 'advanced' && (
+                          <div className="space-y-4">
+                            <div>
+                              <label className="flex items-center text-sm text-gray-700">
+                                <input
+                                  type="checkbox"
+                                  checked={currentChartConfig.styling.showDataLabels}
+                                  onChange={(e) => updateCurrentChartConfig('styling', 'showDataLabels', e.target.checked)}
+                                  className="mr-2 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                />
+                                显示数据标签
+                              </label>
+                            </div>
+                            
+                            {currentChartConfig.styling.showDataLabels && (
+                              <div className="space-y-4">
+                                <div>
+                                  <label className="block text-sm text-gray-700 mb-2">数据格式</label>
+                                  <select
+                                    value={currentChartConfig.styling.dataLabelFormat}
+                                    onChange={(e) => updateCurrentChartConfig('styling', 'dataLabelFormat', e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                  >
+                                    <option value="整数">整数</option>
+                                    <option value="1位小数">1位小数</option>
+                                    <option value="2位小数">2位小数</option>
+                                    <option value="百分比">百分比</option>
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="block text-sm text-gray-700 mb-2">标签位置</label>
+                                  <select
+                                    value={currentChartConfig.styling.dataLabelPosition}
+                                    onChange={(e) => updateCurrentChartConfig('styling', 'dataLabelPosition', e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                  >
+                                    <option value="center">中心</option>
+                                    <option value="start">开始</option>
+                                    <option value="end">结束</option>
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="block text-sm text-gray-700 mb-2">标签颜色</label>
+                                  <div className="flex items-center space-x-2">
+                                    <input
+                                      type="color"
+                                      value={currentChartConfig.styling.dataLabelColor}
+                                      onChange={(e) => updateCurrentChartConfig('styling', 'dataLabelColor', e.target.value)}
+                                      className="w-12 h-10 border border-gray-300 rounded-md cursor-pointer"
+                                    />
+                                    <input
+                                      type="text"
+                                      value={currentChartConfig.styling.dataLabelColor}
+                                      onChange={(e) => updateCurrentChartConfig('styling', 'dataLabelColor', e.target.value)}
+                                      className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                      placeholder="#ffffff"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* 抽屉底部 */}
+                    <div className="p-6 border-t border-gray-200">
+                      <button
+                        onClick={closeConfigDrawer}
+                        className="w-full professional-btn professional-btn-primary"
+                      >
+                        完成配置
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )
 
