@@ -536,25 +536,60 @@ const SimpleApp: React.FC = () => {
     const initialConfigs: Record<string, any> = {}
     selectedChartTypes.forEach(chartType => {
       if (!chartConfigs[chartType]) {
-        initialConfigs[chartType] = {
-          dataSeries: {
-            xAxis: dataSeries.xAxis,
-            yAxis: dataSeries.yAxis,
-            yAxis2: ''
-          },
-          styling: {
-            title: chartConfig.title,
-            colorScheme: chartConfig.colorScheme,
-            showLegend: true,
-            legendPosition: 'top',
-            showGridLines: true,
-            showDataLabels: false,
-            dataLabelFormat: '1位小数'
-          },
-          layout: {
-            showAxisLabels: currentChartConfig.layout.showAxisLabels,
-            xAxisLabel: '',
-            yAxisLabel: ''
+        // 为组合图表提供完整的配置结构
+        if (chartType === 'combination') {
+          initialConfigs[chartType] = {
+            dataSeries: {
+              xAxis: dataSeries.xAxis,
+              yAxis: dataSeries.yAxis,
+              yAxis2: '',
+              yAxisConfig: {
+                chartType: 'bar' as const,
+                axisPosition: 'primary' as const
+              },
+              yAxis2Config: {
+                chartType: 'line' as const,
+                axisPosition: 'secondary' as const
+              },
+              additionalYAxes: []
+            },
+            styling: {
+              title: chartConfig?.title || '',
+              colorScheme: chartConfig?.colorScheme || 'business_blue_gray',
+              showLegend: true,
+              legendPosition: 'top',
+              showGridLines: true,
+              showDataLabels: false,
+              dataLabelFormat: '1位小数'
+            },
+            layout: {
+              showAxisLabels: currentChartConfig?.layout?.showAxisLabels ?? true,
+              xAxisLabel: '',
+              yAxisLabel: ''
+            }
+          };
+        } else {
+          // 其他图表类型的标准配置
+          initialConfigs[chartType] = {
+            dataSeries: {
+              xAxis: dataSeries.xAxis,
+              yAxis: dataSeries.yAxis,
+              yAxis2: ''
+            },
+            styling: {
+              title: chartConfig?.title || '',
+              colorScheme: chartConfig?.colorScheme || 'business_blue_gray',
+              showLegend: true,
+              legendPosition: 'top',
+              showGridLines: true,
+              showDataLabels: false,
+              dataLabelFormat: '1位小数'
+            },
+            layout: {
+              showAxisLabels: currentChartConfig?.layout?.showAxisLabels ?? true,
+              xAxisLabel: '',
+              yAxisLabel: ''
+            }
           }
         }
       }
@@ -814,8 +849,9 @@ const SimpleApp: React.FC = () => {
           try {
             // 使用当前图表的独立配色方案 - 组合图使用自己的配置
             const currentChartConfigs_instance = chartType === 'combination' ? (chartConfigs['combination'] || currentChartConfig) : (chartConfigs[chartType] || currentChartConfig)
-            
-            const colorSchemeName = currentChartConfigs_instance.styling.colorScheme
+
+            // 安全获取配色方案，添加防御性检查
+            const colorSchemeName = currentChartConfigs_instance?.styling?.colorScheme || currentChartConfig?.styling?.colorScheme || 'business_blue_gray'
             const colors = colorSchemes[colorSchemeName as keyof typeof colorSchemes] || colorSchemes.business_blue_gray
             
             // 根据图表类型调整数据配置
@@ -861,6 +897,25 @@ const SimpleApp: React.FC = () => {
               // 处理组合图表 - 默认显示柱状图+折线图
               const chartConfig_instance = chartConfigs['combination'] || currentChartConfig
               const additionalYAxes = chartConfig_instance.dataSeries.additionalYAxes || []
+
+              // 确保第二Y轴数据存在，如果不存在则自动选择
+              let secondYAxisData = chartConfig_instance.dataSeries.yAxis2
+              const mainYAxisData = chartConfig_instance.dataSeries.yAxis || dataSeries.yAxis
+              console.log('组合图表调试 - 初始第二Y轴:', secondYAxisData, '主Y轴:', mainYAxisData)
+
+              if (!secondYAxisData || secondYAxisData === mainYAxisData) {
+                const suggestedSecondaryYAxis = getBestSecondaryYAxis(mainYAxisData)
+                console.log('组合图表调试 - 建议的第二Y轴:', suggestedSecondaryYAxis, '可用选项:', dataOptions.yAxis)
+
+                if (suggestedSecondaryYAxis) {
+                  secondYAxisData = suggestedSecondaryYAxis
+                  // 立即更新配置
+                  updateCurrentChartConfig('dataSeries', 'yAxis2', secondYAxisData)
+                  console.log('组合图表调试 - 已设置第二Y轴:', secondYAxisData)
+                } else {
+                  console.warn('组合图表调试 - 无法找到合适的第二Y轴数据')
+                }
+              }
               
               // 数据范围检测和自动调整函数
               const calculateDataRange = (dataKey: string) => {
@@ -949,10 +1004,33 @@ const SimpleApp: React.FC = () => {
               let datasets = []
               
               try {
-                // 获取样式和布局配置 - 直接使用组合图配置
+                // 获取样式和布局配置 - 直接使用组合图配置，添加安全检查
                 const chartConfigs_instance = chartConfigs['combination'] || currentChartConfig
-                const chartStyling = chartConfigs_instance.styling || currentChartConfig.styling
-                const chartLayout = chartConfigs_instance.layout || currentChartConfig.layout
+                const chartStyling = chartConfigs_instance?.styling || currentChartConfig?.styling || {}
+                const chartLayout = chartConfigs_instance?.layout || currentChartConfig?.layout || {}
+
+                // 为样式属性提供默认值，防止undefined错误
+                const safeStyling = {
+                  showLegend: chartStyling.showLegend ?? true,
+                  legendPosition: chartStyling.legendPosition ?? 'top',
+                  showGridLines: chartStyling.showGridLines ?? true,
+                  showDataLabels: chartStyling.showDataLabels ?? false,
+                  dataLabelFormat: chartStyling.dataLabelFormat ?? '1位小数',
+                  dataLabelPosition: chartStyling.dataLabelPosition ?? 'center',
+                  dataLabelColor: chartStyling.dataLabelColor ?? '#ffffff',
+                  title: chartStyling.title || `${getChartTypeName(chartType)}：${dataSeries.yAxis}`,
+                  ...chartStyling
+                }
+
+                const safeLayout = {
+                  showAxisLabels: chartLayout.showAxisLabels ?? true,
+                  xAxisLabel: chartLayout.xAxisLabel || '',
+                  yAxisLabel: chartLayout.yAxisLabel || '',
+                  yAxis2Label: chartLayout.yAxis2Label || (secondYAxisData || '第二Y轴'),
+                  ...chartLayout
+                }
+
+                console.log('组合图表调试 - 配置实例:', chartConfigs_instance, '样式:', safeStyling, '布局:', safeLayout)
 
                     
                 // 主数据系列（使用图表独立配置）
@@ -979,8 +1057,11 @@ const SimpleApp: React.FC = () => {
                 })
                 
                 // 第二数据系列
-                const secondYAxisData = chartConfig_instance.dataSeries.yAxis2
                 const secondYAxisConfig = chartConfig_instance.dataSeries.yAxis2Config || { chartType: 'line' as const, axisPosition: 'secondary' as const }
+
+                console.log('组合图表调试 - 最终第二Y轴数据:', secondYAxisData, '主Y轴数据:', mainYAxisData)
+                console.log('组合图表调试 - 第二Y轴实际数据:', previewData[secondYAxisData as keyof typeof previewData])
+                console.log('组合图表调试 - 主Y轴实际数据:', previewData[mainYAxisData as keyof typeof previewData])
 
                   if (secondYAxisData && secondYAxisData !== mainYAxisData) {
                   // 计算第二Y轴的背景颜色
@@ -1028,7 +1109,23 @@ const SimpleApp: React.FC = () => {
                     })
                   }
                 })
-                
+
+                console.log('组合图表调试 - 数据集数量:', datasets.length, '数据集:', datasets)
+
+                // 如果没有数据集，创建一个默认的数据集以确保图表能显示
+                if (datasets.length === 0) {
+                  console.warn('组合图表调试 - 没有数据集，创建默认数据集')
+                  datasets.push({
+                    label: mainYAxisData || '数据',
+                    data: previewData[mainYAxisData as keyof typeof previewData] || [120, 190, 300, 240, 280, 320],
+                    backgroundColor: colors.background,
+                    borderColor: colors.border,
+                    borderWidth: 1,
+                    type: 'bar',
+                    yAxisID: 'y'
+                  })
+                }
+
                 // 使用图表独立配置的X轴数据
                 const xAxisData = chartConfig_instance.dataSeries.xAxis || dataSeries.xAxis
                 chartConfig_data = {
@@ -1042,8 +1139,8 @@ const SimpleApp: React.FC = () => {
                     maintainAspectRatio: false,
                     plugins: {
                       legend: {
-                        display: chartStyling.showLegend && chartType !== 'pie' && chartType !== 'doughnut',
-                        position: chartStyling.legendPosition,
+                        display: safeStyling.showLegend && chartType !== 'pie' && chartType !== 'doughnut',
+                        position: safeStyling.legendPosition,
                         labels: {
                           boxWidth: 12,
                           padding: 8,
@@ -1053,27 +1150,27 @@ const SimpleApp: React.FC = () => {
                         }
                       },
                       title: {
-                        display: !!chartStyling.title,
-                        text: chartStyling.title || `${getChartTypeName(chartType)}`,
+                        display: !!safeStyling.title,
+                        text: safeStyling.title || `${getChartTypeName(chartType)}`,
                         font: {
                           size: 14,
                           weight: 'bold'
                         }
                       },
                       datalabels: {
-                        display: chartStyling.showDataLabels,
-                        color: chartStyling.dataLabelColor || '#fff',
-                        anchor: chartStyling.dataLabelPosition || 'center',
+                        display: safeStyling.showDataLabels,
+                        color: safeStyling.dataLabelColor || '#fff',
+                        anchor: safeStyling.dataLabelPosition || 'center',
                         font: {
                           weight: 'bold',
                           size: 10
                         },
                         formatter: (value: number) => {
-                          if (chartStyling.dataLabelFormat === '百分比') {
+                          if (safeStyling.dataLabelFormat === '百分比') {
                             return `${value}%`;
-                          } else if (chartStyling.dataLabelFormat === '1位小数') {
+                          } else if (safeStyling.dataLabelFormat === '1位小数') {
                             return value.toFixed(1);
-                          } else if (chartStyling.dataLabelFormat === '2位小数') {
+                          } else if (safeStyling.dataLabelFormat === '2位小数') {
                             return value.toFixed(2);
                           } else {
                             return value.toString();
@@ -1084,13 +1181,13 @@ const SimpleApp: React.FC = () => {
                     scales: {
                       y: {
                         type: 'linear',
-                        display: chartLayout.showAxisLabels,
+                        display: safeLayout.showAxisLabels,
                         position: 'left',
                         beginAtZero: true,
                         min: yAxisRanges.primary?.min,
                         max: yAxisRanges.primary?.max,
                         grid: {
-                          display: chartStyling.showGridLines,
+                          display: safeStyling.showGridLines,
                           color: 'rgba(0, 0, 0, 0.1)'
                         },
                         ticks: {
@@ -1099,20 +1196,20 @@ const SimpleApp: React.FC = () => {
                           }
                         },
                         title: {
-                          display: !!chartLayout.yAxisLabel,
-                          text: chartLayout.yAxisLabel
+                          display: !!safeLayout.yAxisLabel,
+                          text: safeLayout.yAxisLabel
                         }
                       },
                       y1: {
                         type: 'linear',
-                        display: secondYAxisData && secondYAxisData !== mainYAxisData ? chartLayout.showAxisLabels : false,
+                        display: secondYAxisData && secondYAxisData !== mainYAxisData ? safeLayout.showAxisLabels : false,
                         position: 'right',
                         beginAtZero: true,
                         min: yAxisRanges.secondary?.min,
                         max: yAxisRanges.secondary?.max,
                         grid: {
                           drawOnChartArea: false,  // 次Y轴网格线不在图表区域绘制，避免与主Y轴混淆
-                          display: chartStyling.showGridLines  // 控制是否显示次Y轴的刻度线
+                          display: safeStyling.showGridLines  // 控制是否显示次Y轴的刻度线
                         },
                         ticks: {
                           font: {
@@ -1121,13 +1218,13 @@ const SimpleApp: React.FC = () => {
                         },
                         title: {
                           display: true,
-                          text: chartLayout.yAxis2Label || secondYAxisData || '第二Y轴'
+                          text: safeLayout.yAxis2Label || secondYAxisData || '第二Y轴'
                         }
                       },
-                      x: { 
-                        display: chartLayout.showAxisLabels,
+                      x: {
+                        display: safeLayout.showAxisLabels,
                         grid: {
-                          display: chartStyling.showGridLines,
+                          display: safeStyling.showGridLines,
                           color: 'rgba(0, 0, 0, 0.1)'
                         },
                         ticks: {
@@ -1136,8 +1233,8 @@ const SimpleApp: React.FC = () => {
                           }
                         },
                         title: {
-                          display: !!chartLayout.xAxisLabel,
-                          text: chartLayout.xAxisLabel
+                          display: !!safeLayout.xAxisLabel,
+                          text: safeLayout.xAxisLabel
                         }
                       }
                     }
@@ -1224,8 +1321,28 @@ const SimpleApp: React.FC = () => {
             
             // 设置通用选项 - 为卡片显示优化
             // 使用用户个性化设置
-            const chartStyling = currentChartConfigs_instance.styling
-            const chartLayout = currentChartConfigs_instance.layout
+            const chartStyling = currentChartConfigs_instance?.styling || {}
+            const chartLayout = currentChartConfigs_instance?.layout || {}
+
+            // 为样式属性提供默认值，防止undefined错误
+            const safeStyling = {
+              showLegend: chartStyling.showLegend ?? true,
+              legendPosition: chartStyling.legendPosition ?? 'top',
+              showGridLines: chartStyling.showGridLines ?? true,
+              showDataLabels: chartStyling.showDataLabels ?? false,
+              dataLabelFormat: chartStyling.dataLabelFormat ?? '1位小数',
+              dataLabelPosition: chartStyling.dataLabelPosition ?? 'center',
+              dataLabelColor: chartStyling.dataLabelColor ?? '#ffffff',
+              title: chartStyling.title || `${getChartTypeName(chartType)}`,
+              ...chartStyling
+            }
+
+            const safeLayout = {
+              showAxisLabels: chartLayout.showAxisLabels ?? true,
+              xAxisLabel: chartLayout.xAxisLabel ?? '',
+              yAxisLabel: chartLayout.yAxisLabel ?? '',
+              ...chartLayout
+            }
 
             // 设置通用选项 - 为卡片显示优化
             // 对于组合图表，只更新plugins，保留原有的scales配置
@@ -1233,8 +1350,8 @@ const SimpleApp: React.FC = () => {
               // 组合图表：只更新plugins配置，保留scales
               chartConfig_data.options.plugins = {
                 legend: {
-                  display: chartStyling.showLegend && chartType !== 'pie' && chartType !== 'doughnut',
-                  position: chartStyling.legendPosition,
+                  display: safeStyling.showLegend && chartType !== 'pie' && chartType !== 'doughnut',
+                  position: safeStyling.legendPosition,
                   labels: {
                     boxWidth: 12,
                     padding: 8,
@@ -1244,27 +1361,27 @@ const SimpleApp: React.FC = () => {
                   }
                 },
                 title: {
-                  display: !!chartStyling.title,
-                  text: chartStyling.title || `${getChartTypeName(chartType)}`,
+                  display: !!safeStyling.title,
+                  text: safeStyling.title || `${getChartTypeName(chartType)}`,
                   font: {
                     size: 14,
                     weight: 'bold'
                   }
                 },
                 datalabels: {
-                  display: chartStyling.showDataLabels,
-                  color: chartStyling.dataLabelColor || '#fff',
-                  anchor: chartStyling.dataLabelPosition || 'center',
+                  display: safeStyling.showDataLabels,
+                  color: safeStyling.dataLabelColor || '#fff',
+                  anchor: safeStyling.dataLabelPosition || 'center',
                   font: {
                     weight: 'bold',
                     size: 10
                   },
                   formatter: (value: number) => {
-                    if (chartStyling.dataLabelFormat === '百分比') {
+                    if (safeStyling.dataLabelFormat === '百分比') {
                       return `${value}%`;
-                    } else if (chartStyling.dataLabelFormat === '1位小数') {
+                    } else if (safeStyling.dataLabelFormat === '1位小数') {
                       return value.toFixed(1);
-                    } else if (chartStyling.dataLabelFormat === '2位小数') {
+                    } else if (safeStyling.dataLabelFormat === '2位小数') {
                       return value.toFixed(2);
                     } else {
                       return value.toString();
@@ -1279,8 +1396,8 @@ const SimpleApp: React.FC = () => {
                 maintainAspectRatio: false,
                 plugins: {
                   legend: {
-                    display: chartStyling.showLegend && chartType !== 'pie' && chartType !== 'doughnut',
-                    position: chartStyling.legendPosition,
+                    display: safeStyling.showLegend && chartType !== 'pie' && chartType !== 'doughnut',
+                    position: safeStyling.legendPosition,
                     labels: {
                       boxWidth: 12,
                       padding: 8,
@@ -1290,27 +1407,27 @@ const SimpleApp: React.FC = () => {
                     }
                   },
                   title: {
-                    display: !!chartStyling.title,
-                    text: chartStyling.title || `${getChartTypeName(chartType)}`,
+                    display: !!safeStyling.title,
+                    text: safeStyling.title || `${getChartTypeName(chartType)}`,
                     font: {
                       size: 14,
                       weight: 'bold'
                     }
                   },
                   datalabels: {
-                    display: chartStyling.showDataLabels,
-                    color: chartStyling.dataLabelColor || '#fff',
-                    anchor: chartStyling.dataLabelPosition || 'center',
+                    display: safeStyling.showDataLabels,
+                    color: safeStyling.dataLabelColor || '#fff',
+                    anchor: safeStyling.dataLabelPosition || 'center',
                     font: {
                       weight: 'bold',
                       size: 10
                     },
                     formatter: (value: number) => {
-                      if (chartStyling.dataLabelFormat === '百分比') {
+                      if (safeStyling.dataLabelFormat === '百分比') {
                         return `${value}%`;
-                      } else if (chartStyling.dataLabelFormat === '1位小数') {
+                      } else if (safeStyling.dataLabelFormat === '1位小数') {
                         return value.toFixed(1);
-                      } else if (chartStyling.dataLabelFormat === '2位小数') {
+                      } else if (safeStyling.dataLabelFormat === '2位小数') {
                         return value.toFixed(2);
                       } else {
                         return value.toString();
@@ -1321,10 +1438,10 @@ const SimpleApp: React.FC = () => {
                 scales: chartType !== 'pie' && chartType !== 'doughnut' && chartType !== 'combination' ? {
                   // 普通图表单Y轴配置（排除组合图表，因为它有自己的配置）
                   y: {
-                    display: chartLayout.showAxisLabels,
+                    display: safeLayout.showAxisLabels,
                     beginAtZero: true,
                     grid: {
-                      display: chartStyling.showGridLines,
+                      display: safeStyling.showGridLines,
                       color: 'rgba(0, 0, 0, 0.1)'
                     },
                     ticks: {
@@ -1333,14 +1450,14 @@ const SimpleApp: React.FC = () => {
                       }
                     },
                     title: {
-                      display: !!chartLayout.yAxisLabel,
-                      text: chartLayout.yAxisLabel
+                      display: !!safeLayout.yAxisLabel,
+                      text: safeLayout.yAxisLabel
                     }
                   },
                   x: {
-                    display: chartLayout.showAxisLabels,
+                    display: safeLayout.showAxisLabels,
                     grid: {
-                      display: chartStyling.showGridLines,
+                      display: safeStyling.showGridLines,
                       color: 'rgba(0, 0, 0, 0.1)'
                     },
                     ticks: {
@@ -1349,8 +1466,8 @@ const SimpleApp: React.FC = () => {
                       }
                     },
                     title: {
-                      display: !!chartLayout.xAxisLabel,
-                      text: chartLayout.xAxisLabel
+                      display: !!safeLayout.xAxisLabel,
+                      text: safeLayout.xAxisLabel
                     }
                   }
                 } : {}
@@ -1715,19 +1832,40 @@ const SimpleApp: React.FC = () => {
     }
   }
 
+  // 获取最佳第二Y轴数据的辅助函数
+  const getBestSecondaryYAxis = useCallback((currentPrimaryYAxis: string): string | null => {
+    const availableYAxisOptions = dataOptions.yAxis
+
+    // 确保至少有2个数值列才适合组合图表
+    if (availableYAxisOptions.length < 2) {
+      return null
+    }
+
+    // 过滤掉当前主Y轴，获取可用的第二Y轴选项
+    const secondaryOptions = availableYAxisOptions.filter(option => option !== currentPrimaryYAxis)
+
+    // 如果有可用的第二Y轴选项，返回第一个
+    if (secondaryOptions.length > 0) {
+      return secondaryOptions[0]
+    }
+
+    // 如果没有合适的选项，返回null
+    return null
+  }, [dataOptions.yAxis])
+
   const handleChartTypeToggle = (type: string) => {
     setSelectedChartTypes(prev => {
-      const newSelection = prev.includes(type) 
+      const newSelection = prev.includes(type)
         ? prev.filter(t => t !== type)
         : [...prev, type]
-      
+
       // 如果是新增的图表类型，添加到图表实例中
       if (!prev.includes(type) && !chartInstances.some(chart => chart.type === type)) {
         setTimeout(() => {
           addNewChart(type)
         }, 100)
       }
-      
+
       // 如果是取消选择的图表类型，从图表实例中移除
       if (prev.includes(type)) {
         const chartToRemove = chartInstances.find(chart => chart.type === type)
@@ -1737,7 +1875,36 @@ const SimpleApp: React.FC = () => {
           }, 100)
         }
       }
-      
+
+      // 特殊处理：组合图表自动选择第二Y轴数据
+      if (type === 'combination' && !prev.includes(type)) {
+        // 如果是新增组合图表，尝试自动选择第二Y轴
+        const currentPrimaryYAxis = currentChartConfig.dataSeries.yAxis
+        const currentSecondaryYAxis = currentChartConfig.dataSeries.yAxis2
+
+        // 只有在用户尚未手动设置第二Y轴时才自动选择
+        if (!currentSecondaryYAxis) {
+          const suggestedSecondaryYAxis = getBestSecondaryYAxis(currentPrimaryYAxis)
+
+          if (suggestedSecondaryYAxis) {
+            // 自动设置第二Y轴数据
+            updateCurrentChartConfig('dataSeries', 'yAxis2', suggestedSecondaryYAxis)
+
+            // 同时更新组合图表的专用配置
+            setChartConfigs(prev => ({
+              ...prev,
+              'combination': {
+                ...prev['combination'],
+                dataSeries: {
+                  ...prev['combination']?.dataSeries,
+                  yAxis2: suggestedSecondaryYAxis
+                }
+              }
+            }))
+          }
+        }
+      }
+
       return newSelection
     })
   }
@@ -2283,7 +2450,11 @@ const SimpleApp: React.FC = () => {
                                     </div>
                                   </div>
                                   <button
-                                    onClick={() => openConfigDrawer(chartType)}
+                                    onClick={(e) => {
+                                      e.preventDefault()
+                                      e.stopPropagation()
+                                      openConfigDrawer(chartType)
+                                    }}
                                     className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                                     title="配置图表"
                                   >
@@ -2476,7 +2647,7 @@ const SimpleApp: React.FC = () => {
                               <label className="block text-sm text-gray-700 mb-2">图表标题</label>
                               <input
                                 type="text"
-                                value={currentChartConfig.styling.title}
+                                value={currentChartConfig.styling?.title || ''}
                                 onChange={(e) => updateCurrentChartConfig('styling', 'title', e.target.value)}
                                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                 placeholder="输入图表标题"
@@ -2486,7 +2657,7 @@ const SimpleApp: React.FC = () => {
                             <div>
                               <label className="block text-sm text-gray-700 mb-2">配色方案</label>
                               <select
-                                value={currentChartConfig.styling.colorScheme}
+                                value={currentChartConfig.styling?.colorScheme || 'business_blue_gray'}
                                 onChange={(e) => {
                                   updateCurrentChartConfig('styling', 'colorScheme', e.target.value)
                                 }}
@@ -2504,7 +2675,7 @@ const SimpleApp: React.FC = () => {
                               <div>
                                 <label className="block text-sm text-gray-700 mb-2">显示图例</label>
                                 <select
-                                  value={currentChartConfig.styling.showLegend.toString()}
+                                  value={(currentChartConfig.styling?.showLegend ?? true).toString()}
                                   onChange={(e) => updateCurrentChartConfig('styling', 'showLegend', e.target.value === 'true')}
                                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                 >
@@ -2513,11 +2684,11 @@ const SimpleApp: React.FC = () => {
                                 </select>
                               </div>
                               
-                              {currentChartConfig.styling.showLegend && (
+                              {currentChartConfig.styling?.showLegend && (
                                 <div>
                                   <label className="block text-sm text-gray-700 mb-2">图例位置</label>
                                   <select
-                                    value={currentChartConfig.styling.legendPosition}
+                                    value={currentChartConfig.styling?.legendPosition || 'top'}
                                     onChange={(e) => updateCurrentChartConfig('styling', 'legendPosition', e.target.value)}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                   >
@@ -2533,7 +2704,7 @@ const SimpleApp: React.FC = () => {
                               <label className="flex items-center text-sm text-gray-700">
                                 <input
                                   type="checkbox"
-                                  checked={currentChartConfig.styling.showGridLines}
+                                  checked={currentChartConfig.styling?.showGridLines ?? true}
                                   onChange={(e) => {
                                     updateCurrentChartConfig('styling', 'showGridLines', e.target.checked);
                                   }}
@@ -2850,20 +3021,20 @@ const SimpleApp: React.FC = () => {
                               <label className="flex items-center text-sm text-gray-700">
                                 <input
                                   type="checkbox"
-                                  checked={currentChartConfig.styling.showDataLabels}
+                                  checked={currentChartConfig.styling?.showDataLabels ?? false}
                                   onChange={(e) => updateCurrentChartConfig('styling', 'showDataLabels', e.target.checked)}
                                   className="mr-2 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                                 />
                                 显示数据标签
                               </label>
                             </div>
-                            
-                            {currentChartConfig.styling.showDataLabels && (
+
+                            {currentChartConfig.styling?.showDataLabels && (
                               <div className="space-y-4">
                                 <div>
                                   <label className="block text-sm text-gray-700 mb-2">数据格式</label>
                                   <select
-                                    value={currentChartConfig.styling.dataLabelFormat}
+                                    value={currentChartConfig.styling?.dataLabelFormat || '整数'}
                                     onChange={(e) => updateCurrentChartConfig('styling', 'dataLabelFormat', e.target.value)}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                   >
@@ -2876,7 +3047,7 @@ const SimpleApp: React.FC = () => {
                                 <div>
                                   <label className="block text-sm text-gray-700 mb-2">标签位置</label>
                                   <select
-                                    value={currentChartConfig.styling.dataLabelPosition}
+                                    value={currentChartConfig.styling?.dataLabelPosition || 'center'}
                                     onChange={(e) => updateCurrentChartConfig('styling', 'dataLabelPosition', e.target.value)}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                   >
@@ -2890,13 +3061,13 @@ const SimpleApp: React.FC = () => {
                                   <div className="flex items-center space-x-2">
                                     <input
                                       type="color"
-                                      value={currentChartConfig.styling.dataLabelColor}
+                                      value={currentChartConfig.styling?.dataLabelColor || '#000000'}
                                       onChange={(e) => updateCurrentChartConfig('styling', 'dataLabelColor', e.target.value)}
                                       className="w-12 h-10 border border-gray-300 rounded-md cursor-pointer"
                                     />
                                     <input
                                       type="text"
-                                      value={currentChartConfig.styling.dataLabelColor}
+                                      value={currentChartConfig.styling?.dataLabelColor || '#000000'}
                                       onChange={(e) => updateCurrentChartConfig('styling', 'dataLabelColor', e.target.value)}
                                       className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                       placeholder="#ffffff"
