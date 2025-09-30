@@ -455,7 +455,15 @@ const SimpleApp: React.FC = () => {
         dataSeries: {
           xAxis: dataSeries.xAxis,
           yAxis: dataSeries.yAxis,
-          yAxis2: ''
+          yAxis2: '',
+          yAxisConfig: {
+            chartType: 'bar' as const,
+            axisPosition: 'primary' as const
+          },
+          yAxis2Config: {
+            chartType: 'line' as const,
+            axisPosition: 'secondary' as const
+          }
         },
         styling: {
           title: chartConfig.title,
@@ -469,7 +477,7 @@ const SimpleApp: React.FC = () => {
           dataLabelColor: '#ffffff'
         },
         layout: {
-          showAxisLabels: chartConfig.showAxisLabels,
+          showAxisLabels: currentChartConfig.layout.showAxisLabels,
           xAxisLabel: '',
           yAxisLabel: ''
         }
@@ -491,12 +499,20 @@ const SimpleApp: React.FC = () => {
       xAxis: string
       yAxis: string
       yAxis2?: string
+      yAxisConfig?: {
+        chartType: 'bar' | 'line' | 'area'
+        axisPosition: 'primary' | 'secondary'
+      }
+      yAxis2Config?: {
+        chartType: 'bar' | 'line' | 'area'
+        axisPosition: 'primary' | 'secondary'
+      }
       additionalYAxes?: Array<{
         id: string
         dataKey: string
         type: 'bar' | 'line' | 'area'
         color: string
-        position: 'left' | 'right'
+        axisPosition: 'primary' | 'secondary'
       }>
     }
     styling: {
@@ -536,7 +552,7 @@ const SimpleApp: React.FC = () => {
             dataLabelFormat: '1位小数'
           },
           layout: {
-            showAxisLabels: chartConfig.showAxisLabels,
+            showAxisLabels: currentChartConfig.layout.showAxisLabels,
             xAxisLabel: '',
             yAxisLabel: ''
           }
@@ -573,26 +589,46 @@ const SimpleApp: React.FC = () => {
   
   // 更新当前图表配置
   const updateCurrentChartConfig = useCallback((section: string, field: string, value: any) => {
-    setCurrentChartConfig(prev => ({
-      ...prev,
-      [section]: {
-        ...prev[section as keyof typeof prev],
-        [field]: value
+  
+    setCurrentChartConfig(prev => {
+      const newConfig = {
+        ...prev,
+        [section]: {
+          ...prev[section as keyof typeof prev],
+          [field]: value
+        }
       }
-    }))
-    
+        return newConfig
+    })
+
     // 同时更新图表配置状态
     if (selectedChartForConfig) {
-      setChartConfigs(prev => ({
-        ...prev,
-        [selectedChartForConfig]: {
-          ...prev[selectedChartForConfig],
-          [section]: {
-            ...prev[selectedChartForConfig][section as keyof typeof prev[selectedChartForConfig]],
-            [field]: value
+      setChartConfigs(prev => {
+        // 确保图表配置存在
+        const existingConfig = prev[selectedChartForConfig] || {
+          dataSeries: {
+            xAxis: dataSeries.xAxis,
+            yAxis: dataSeries.yAxis,
+            yAxis2: '',
+            yAxisConfig: { chartType: 'bar' as const, axisPosition: 'primary' as const },
+            yAxis2Config: { chartType: 'line' as const, axisPosition: 'secondary' as const }
+          },
+          styling: { ...currentChartConfig.styling },
+          layout: { ...currentChartConfig.layout }
+        }
+
+        const newConfigs = {
+          ...prev,
+          [selectedChartForConfig]: {
+            ...existingConfig,
+            [section]: {
+              ...existingConfig[section as keyof typeof existingConfig],
+              [field]: value
+            }
           }
         }
-      }))
+          return newConfigs
+      })
     }
   }, [selectedChartForConfig])
   
@@ -694,7 +730,6 @@ const SimpleApp: React.FC = () => {
   useEffect(() => {
     if (currentStep !== 'chart_generation' || selectedChartTypes.length === 0) return
     
-    console.log('🎨 颜色方案变化，强制重新创建图表')
     
     // 销毁所有现有图表
     Object.keys(chartRefs.current).forEach(chartKey => {
@@ -707,7 +742,9 @@ const SimpleApp: React.FC = () => {
 
   // 图表实时预览 - 支持多图表同时显示
   useEffect(() => {
-    if (currentStep !== 'chart_generation' || selectedChartTypes.length === 0) return
+    if (currentStep !== 'chart_generation' || selectedChartTypes.length === 0) {
+      return
+    }
 
     // 使用真实Excel数据，如果没有则使用默认数据
     const previewData = getPreviewData()
@@ -768,15 +805,15 @@ const SimpleApp: React.FC = () => {
     selectedChartTypes.forEach((chartType) => {
       const canvasId = `chart-canvas-${chartType}`
       const canvas = canvasRefs.current[canvasId]
-      
+
       // Canvas调试信息
-      
+
       if (canvas) {
         const ctx = canvas.getContext('2d')
         if (ctx) {
           try {
-            // 使用当前图表的独立配色方案
-            const currentChartConfigs_instance = chartConfigs[chartType] || currentChartConfig
+            // 使用当前图表的独立配色方案 - 组合图使用自己的配置
+            const currentChartConfigs_instance = chartType === 'combination' ? (chartConfigs['combination'] || currentChartConfig) : (chartConfigs[chartType] || currentChartConfig)
             
             const colorSchemeName = currentChartConfigs_instance.styling.colorScheme
             const colors = colorSchemes[colorSchemeName as keyof typeof colorSchemes] || colorSchemes.business_blue_gray
@@ -822,16 +859,8 @@ const SimpleApp: React.FC = () => {
               }
             } else if (chartType === 'combination') {
               // 处理组合图表 - 默认显示柱状图+折线图
-              const chartConfig_instance = chartConfigs[chartType] || currentChartConfig
+              const chartConfig_instance = chartConfigs['combination'] || currentChartConfig
               const additionalYAxes = chartConfig_instance.dataSeries.additionalYAxes || []
-              
-              // 调试信息
-              console.log('组合图表配置:', {
-                chartType,
-                chartConfig_instance,
-                dataSeries,
-                previewData: Object.keys(previewData)
-              })
               
               // 数据范围检测和自动调整函数
               const calculateDataRange = (dataKey: string) => {
@@ -851,25 +880,67 @@ const SimpleApp: React.FC = () => {
               // 自动调整Y轴配置
               const autoAdjustYAxes = () => {
                 const mainYAxisData = chartConfig_instance.dataSeries.yAxis || dataSeries.yAxis
+                const mainYAxisConfig = chartConfig_instance.dataSeries.yAxisConfig || { chartType: 'bar' as const, axisPosition: 'primary' as const }
                 const secondYAxisData = chartConfig_instance.dataSeries.yAxis2
+                const secondYAxisConfig = chartConfig_instance.dataSeries.yAxis2Config || { chartType: 'line' as const, axisPosition: 'secondary' as const }
                 const yAxisRanges: Record<string, { min: number; max: number }> = {}
                 
-                // 计算主Y轴数据范围
-                if (mainYAxisData) {
-                  yAxisRanges.main = calculateDataRange(mainYAxisData)
+                // 计算主坐标轴数据范围
+                const primaryAxisDataKeys = [mainYAxisData]
+                if (secondYAxisData && secondYAxisConfig.axisPosition === 'primary') {
+                  primaryAxisDataKeys.push(secondYAxisData)
                 }
-                
-                // 计算第二Y轴数据范围
-                if (secondYAxisData) {
-                  yAxisRanges.second = calculateDataRange(secondYAxisData)
-                }
-                
-                // 计算额外Y轴数据范围
                 additionalYAxes.forEach(axis => {
-                  if (axis.dataKey) {
-                    yAxisRanges[axis.id] = calculateDataRange(axis.dataKey)
+                  if (axis.dataKey && axis.axisPosition === 'primary') {
+                    primaryAxisDataKeys.push(axis.dataKey)
                   }
                 })
+                
+                // 计算所有主坐标轴数据的综合范围
+                if (primaryAxisDataKeys.length > 0) {
+                  const allPrimaryData = primaryAxisDataKeys.flatMap(key => 
+                    previewData[key as keyof typeof previewData] || []
+                  )
+                  const numericPrimaryData = allPrimaryData.map(val => typeof val === 'number' ? val : parseFloat(val)).filter(val => !isNaN(val))
+                  if (numericPrimaryData.length > 0) {
+                    const min = Math.min(...numericPrimaryData)
+                    const max = Math.max(...numericPrimaryData)
+                    const range = max - min
+                    const padding = range * 0.1
+                    yAxisRanges.primary = { 
+                      min: Math.max(0, min - padding), 
+                      max: max + padding 
+                    }
+                  }
+                }
+                
+                // 计算副坐标轴数据范围
+                const secondaryAxisDataKeys = []
+                if (secondYAxisData && secondYAxisConfig.axisPosition === 'secondary') {
+                  secondaryAxisDataKeys.push(secondYAxisData)
+                }
+                additionalYAxes.forEach(axis => {
+                  if (axis.dataKey && axis.axisPosition === 'secondary') {
+                    secondaryAxisDataKeys.push(axis.dataKey)
+                  }
+                })
+                
+                if (secondaryAxisDataKeys.length > 0) {
+                  const allSecondaryData = secondaryAxisDataKeys.flatMap(key => 
+                    previewData[key as keyof typeof previewData] || []
+                  )
+                  const numericSecondaryData = allSecondaryData.map(val => typeof val === 'number' ? val : parseFloat(val)).filter(val => !isNaN(val))
+                  if (numericSecondaryData.length > 0) {
+                    const min = Math.min(...numericSecondaryData)
+                    const max = Math.max(...numericSecondaryData)
+                    const range = max - min
+                    const padding = range * 0.1
+                    yAxisRanges.secondary = { 
+                      min: Math.max(0, min - padding), 
+                      max: max + padding 
+                    }
+                  }
+                }
                 
                 return yAxisRanges
               }
@@ -878,54 +949,82 @@ const SimpleApp: React.FC = () => {
               let datasets = []
               
               try {
-                // 获取样式和布局配置
-                const chartStyling = chartConfig_instance.styling
-                const chartLayout = chartConfig_instance.layout
-                
+                // 获取样式和布局配置 - 直接使用组合图配置
+                const chartConfigs_instance = chartConfigs['combination'] || currentChartConfig
+                const chartStyling = chartConfigs_instance.styling || currentChartConfig.styling
+                const chartLayout = chartConfigs_instance.layout || currentChartConfig.layout
+
+                    
                 // 主数据系列（使用图表独立配置）
                 const mainYAxisData = chartConfig_instance.dataSeries.yAxis || dataSeries.yAxis
+                const mainYAxisConfig = chartConfig_instance.dataSeries.yAxisConfig || { chartType: 'bar' as const, axisPosition: 'primary' as const }
+                // 计算主Y轴的背景颜色
+                let mainBackgroundColor = colors.background;
+                if (mainYAxisConfig.chartType === 'area') {
+                  mainBackgroundColor = 'rgba(59, 130, 246, 0.3)';
+                }
+                if (mainYAxisConfig.chartType === 'line') {
+                  mainBackgroundColor = 'transparent';
+                }
+                
                 datasets.push({
                   label: mainYAxisData,
                   data: previewData[mainYAxisData as keyof typeof previewData] || [],
-                  backgroundColor: colors.background,
+                  backgroundColor: mainBackgroundColor,
                   borderColor: colors.border,
-                  borderWidth: 1,
-                  type: 'bar',
-                  yAxisID: 'y'
+                  borderWidth: mainYAxisConfig.chartType === 'line' ? 2 : 1,
+                  type: mainYAxisConfig.chartType === 'area' ? 'line' : mainYAxisConfig.chartType,
+                  fill: mainYAxisConfig.chartType === 'area' ? 'origin' : false,
+                  yAxisID: mainYAxisConfig.axisPosition === 'primary' ? 'y' : 'y1'
                 })
                 
-                // 第二数据系列（折线图）
+                // 第二数据系列
                 const secondYAxisData = chartConfig_instance.dataSeries.yAxis2
-                console.log('第二Y轴数据:', {
-                  secondYAxisData: secondYAxisData || '未设置',
-                  mainYAxisData: mainYAxisData || '未设置',
-                  chartConfig_instance: chartConfig_instance.dataSeries,
-                  dataOptions: dataOptions.yAxis
-                })
-                if (secondYAxisData && secondYAxisData !== mainYAxisData) {
+                const secondYAxisConfig = chartConfig_instance.dataSeries.yAxis2Config || { chartType: 'line' as const, axisPosition: 'secondary' as const }
+
+                  if (secondYAxisData && secondYAxisData !== mainYAxisData) {
+                  // 计算第二Y轴的背景颜色
+                  let secondBackgroundColor = colors.secondary?.background || 'rgba(16, 185, 129, 0.8)';
+                  if (secondYAxisConfig.chartType === 'area') {
+                    secondBackgroundColor = 'rgba(16, 185, 129, 0.3)';
+                  }
+                  if (secondYAxisConfig.chartType === 'line') {
+                    secondBackgroundColor = 'transparent';
+                  }
+                  
                   datasets.push({
                     label: secondYAxisData,
                     data: previewData[secondYAxisData as keyof typeof previewData] || [],
-                    backgroundColor: 'transparent',
+                    backgroundColor: secondBackgroundColor,
                     borderColor: colors.secondary?.border || 'rgba(16, 185, 129, 1)',
-                    borderWidth: 2,
-                    type: 'line',
-                    yAxisID: 'y1'
+                    borderWidth: secondYAxisConfig.chartType === 'line' ? 2 : 1,
+                    type: secondYAxisConfig.chartType === 'area' ? 'line' : secondYAxisConfig.chartType,
+                    fill: secondYAxisConfig.chartType === 'area' ? 'origin' : false,
+                    yAxisID: secondYAxisConfig.axisPosition === 'primary' ? 'y' : 'y1'
                   })
                 }
                 
                 // 添加额外的Y轴数据系列
                 additionalYAxes.forEach(axis => {
                   if (axis.dataKey && axis.dataKey !== mainYAxisData && axis.dataKey !== secondYAxisData) {
+                    // 计算额外Y轴的背景颜色
+                    let additionalBackgroundColor = axis.color;
+                    if (axis.type === 'area') {
+                      additionalBackgroundColor = 'rgba(99, 102, 241, 0.3)';
+                    }
+                    if (axis.type === 'line') {
+                      additionalBackgroundColor = 'transparent';
+                    }
+                    
                     datasets.push({
                       label: axis.dataKey,
                       data: previewData[axis.dataKey as keyof typeof previewData] || [],
-                      backgroundColor: axis.type === 'bar' ? axis.color : 'transparent',
+                      backgroundColor: additionalBackgroundColor,
                       borderColor: axis.color,
-                      borderWidth: 2,
+                      borderWidth: axis.type === 'line' ? 2 : 1,
                       type: axis.type === 'area' ? 'line' : axis.type,
                       fill: axis.type === 'area' ? 'origin' : false,
-                      yAxisID: axis.position === 'right' ? 'y1' : 'y'
+                      yAxisID: axis.axisPosition === 'primary' ? 'y' : 'y1'
                     })
                   }
                 })
@@ -988,8 +1087,8 @@ const SimpleApp: React.FC = () => {
                         display: chartLayout.showAxisLabels,
                         position: 'left',
                         beginAtZero: true,
-                        min: yAxisRanges.main?.min,
-                        max: yAxisRanges.main?.max,
+                        min: yAxisRanges.primary?.min,
+                        max: yAxisRanges.primary?.max,
                         grid: {
                           display: chartStyling.showGridLines,
                           color: 'rgba(0, 0, 0, 0.1)'
@@ -1006,18 +1105,23 @@ const SimpleApp: React.FC = () => {
                       },
                       y1: {
                         type: 'linear',
-                        display: yAxisRanges.second ? true : false,
+                        display: secondYAxisData && secondYAxisData !== mainYAxisData ? chartLayout.showAxisLabels : false,
                         position: 'right',
                         beginAtZero: true,
-                        min: yAxisRanges.second?.min,
-                        max: yAxisRanges.second?.max,
+                        min: yAxisRanges.secondary?.min,
+                        max: yAxisRanges.secondary?.max,
                         grid: {
-                          drawOnChartArea: false
+                          drawOnChartArea: false,  // 次Y轴网格线不在图表区域绘制，避免与主Y轴混淆
+                          display: chartStyling.showGridLines  // 控制是否显示次Y轴的刻度线
                         },
                         ticks: {
                           font: {
                             size: 10
                           }
+                        },
+                        title: {
+                          display: true,
+                          text: chartLayout.yAxis2Label || secondYAxisData || '第二Y轴'
                         }
                       },
                       x: { 
@@ -1039,7 +1143,8 @@ const SimpleApp: React.FC = () => {
                     }
                   }
                 }
-              } catch (error) {
+
+                  } catch (error) {
                 console.error('组合图表生成错误:', error)
                 // 如果出错，使用默认的柱状图配置
                 const fallbackXAxis = chartConfig_instance.dataSeries.xAxis || dataSeries.xAxis
@@ -1121,11 +1226,12 @@ const SimpleApp: React.FC = () => {
             // 使用用户个性化设置
             const chartStyling = currentChartConfigs_instance.styling
             const chartLayout = currentChartConfigs_instance.layout
-            
-            chartConfig_data.options = {
-              responsive: true,
-              maintainAspectRatio: false,
-              plugins: {
+
+            // 设置通用选项 - 为卡片显示优化
+            // 对于组合图表，只更新plugins，保留原有的scales配置
+            if (chartType === 'combination' && chartConfig_data.options.scales) {
+              // 组合图表：只更新plugins配置，保留scales
+              chartConfig_data.options.plugins = {
                 legend: {
                   display: chartStyling.showLegend && chartType !== 'pie' && chartType !== 'doughnut',
                   position: chartStyling.legendPosition,
@@ -1165,48 +1271,94 @@ const SimpleApp: React.FC = () => {
                     }
                   }
                 }
-              },
-              scales: chartType !== 'pie' && chartType !== 'doughnut' && chartType !== 'combination' ? {
-                // 普通图表单Y轴配置（排除组合图表，因为它有自己的配置）
-                y: { 
-                  display: chartLayout.showAxisLabels,
-                  beginAtZero: true,
-                  grid: {
-                    display: chartStyling.showGridLines,
-                    color: 'rgba(0, 0, 0, 0.1)'
-                  },
-                  ticks: {
-                    font: {
-                      size: 10
+              };
+            } else {
+              // 非组合图表：使用完整的通用配置
+              chartConfig_data.options = {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                  legend: {
+                    display: chartStyling.showLegend && chartType !== 'pie' && chartType !== 'doughnut',
+                    position: chartStyling.legendPosition,
+                    labels: {
+                      boxWidth: 12,
+                      padding: 8,
+                      font: {
+                        size: 11
+                      }
                     }
                   },
                   title: {
-                    display: !!chartLayout.yAxisLabel,
-                    text: chartLayout.yAxisLabel
+                    display: !!chartStyling.title,
+                    text: chartStyling.title || `${getChartTypeName(chartType)}`,
+                    font: {
+                      size: 14,
+                      weight: 'bold'
+                    }
+                  },
+                  datalabels: {
+                    display: chartStyling.showDataLabels,
+                    color: chartStyling.dataLabelColor || '#fff',
+                    anchor: chartStyling.dataLabelPosition || 'center',
+                    font: {
+                      weight: 'bold',
+                      size: 10
+                    },
+                    formatter: (value: number) => {
+                      if (chartStyling.dataLabelFormat === '百分比') {
+                        return `${value}%`;
+                      } else if (chartStyling.dataLabelFormat === '1位小数') {
+                        return value.toFixed(1);
+                      } else if (chartStyling.dataLabelFormat === '2位小数') {
+                        return value.toFixed(2);
+                      } else {
+                        return value.toString();
+                      }
+                    }
                   }
                 },
-                x: { 
-                  display: chartLayout.showAxisLabels,
-                  grid: {
-                    display: chartStyling.showGridLines,
-                    color: 'rgba(0, 0, 0, 0.1)'
-                  },
-                  ticks: {
-                    font: {
-                      size: 10
+                scales: chartType !== 'pie' && chartType !== 'doughnut' && chartType !== 'combination' ? {
+                  // 普通图表单Y轴配置（排除组合图表，因为它有自己的配置）
+                  y: {
+                    display: chartLayout.showAxisLabels,
+                    beginAtZero: true,
+                    grid: {
+                      display: chartStyling.showGridLines,
+                      color: 'rgba(0, 0, 0, 0.1)'
+                    },
+                    ticks: {
+                      font: {
+                        size: 10
+                      }
+                    },
+                    title: {
+                      display: !!chartLayout.yAxisLabel,
+                      text: chartLayout.yAxisLabel
                     }
                   },
-                  title: {
-                    display: !!chartLayout.xAxisLabel,
-                    text: chartLayout.xAxisLabel
+                  x: {
+                    display: chartLayout.showAxisLabels,
+                    grid: {
+                      display: chartStyling.showGridLines,
+                      color: 'rgba(0, 0, 0, 0.1)'
+                    },
+                    ticks: {
+                      font: {
+                        size: 10
+                      }
+                    },
+                    title: {
+                      display: !!chartLayout.xAxisLabel,
+                      text: chartLayout.xAxisLabel
+                    }
                   }
-                }
-              } : {}
+                } : {}
+              };
             }
 
             // 创建图表实例
             chartRefs.current[chartType] = new Chart(ctx, chartConfig_data)
-            
           } catch (error) {
             console.error(`创建 ${getChartTypeName(chartType)} 图表失败:`, error)
             const errorMessage = error instanceof Error ? error.message : `${getChartTypeName(chartType)} 图表预览创建失败`
@@ -1403,25 +1555,19 @@ const SimpleApp: React.FC = () => {
   // const handleGeneratePreviews = async () => { ... }
 
   const handleGenerateCharts = async () => {
-    console.log('handleGenerateCharts called')
-    console.log('uploadedFileInfo:', uploadedFileInfo)
-    console.log('chartInstances:', chartInstances)
     
     if (!uploadedFileInfo) {
-      console.log('No uploaded file info')
       setError('请先上传文件')
       return
     }
     
     if (chartInstances.length === 0) {
-      console.log('No chart instances')
       setError('请至少添加一个图表')
       return
     }
 
     setIsLoading(true)
     setError('')
-    console.log('Starting chart generation...')
 
     try {
       // 提取所有图表实例的类型
@@ -1562,26 +1708,18 @@ const SimpleApp: React.FC = () => {
   }
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    console.log('handleFileSelect called')
-    console.log('Event target:', e.target)
-    console.log('Files:', e.target.files)
     const files = e.target.files
     if (files && files.length > 0) {
-      console.log('File selected:', files[0].name)
       handleFileUpload(files[0])
     } else {
-      console.log('No files selected')
     }
   }
 
   const handleChartTypeToggle = (type: string) => {
-    console.log('handleChartTypeToggle called with type:', type)
     setSelectedChartTypes(prev => {
-      console.log('Previous selectedChartTypes:', prev)
       const newSelection = prev.includes(type) 
         ? prev.filter(t => t !== type)
         : [...prev, type]
-      console.log('New selectedChartTypes:', newSelection)
       
       // 如果是新增的图表类型，添加到图表实例中
       if (!prev.includes(type) && !chartInstances.some(chart => chart.type === type)) {
@@ -2396,7 +2534,9 @@ const SimpleApp: React.FC = () => {
                                 <input
                                   type="checkbox"
                                   checked={currentChartConfig.styling.showGridLines}
-                                  onChange={(e) => updateCurrentChartConfig('styling', 'showGridLines', e.target.checked)}
+                                  onChange={(e) => {
+                                    updateCurrentChartConfig('styling', 'showGridLines', e.target.checked);
+                                  }}
                                   className="mr-2 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                                 />
                                 显示网格线
@@ -2435,6 +2575,46 @@ const SimpleApp: React.FC = () => {
                                   <option key={option} value={option}>{option}</option>
                                 ))}
                               </select>
+                              
+                              {/* 主Y轴配置 */}
+                              <div className="mt-3 grid grid-cols-2 gap-3">
+                                <div>
+                                  <label className="block text-xs text-gray-600 mb-1">图表类型</label>
+                                  <select
+                                    value={currentChartConfig.dataSeries.yAxisConfig?.chartType || 'bar'}
+                                    onChange={(e) => {
+                                      const currentConfig = currentChartConfig.dataSeries.yAxisConfig || { chartType: 'bar' as const, axisPosition: 'primary' as const }
+                                      updateCurrentChartConfig('dataSeries', 'yAxisConfig', {
+                                        ...currentConfig,
+                                        chartType: e.target.value as 'bar' | 'line' | 'area'
+                                      })
+                                    }}
+                                    className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                                  >
+                                    <option value="bar">柱状</option>
+                                    <option value="line">折线</option>
+                                    <option value="area">面积</option>
+                                  </select>
+                                </div>
+                                
+                                <div>
+                                  <label className="block text-xs text-gray-600 mb-1">坐标轴</label>
+                                  <select
+                                    value={currentChartConfig.dataSeries.yAxisConfig?.axisPosition || 'primary'}
+                                    onChange={(e) => {
+                                      const currentConfig = currentChartConfig.dataSeries.yAxisConfig || { chartType: 'bar' as const, axisPosition: 'primary' as const }
+                                      updateCurrentChartConfig('dataSeries', 'yAxisConfig', {
+                                        ...currentConfig,
+                                        axisPosition: e.target.value as 'primary' | 'secondary'
+                                      })
+                                    }}
+                                    className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                                  >
+                                    <option value="primary">主坐标轴</option>
+                                    <option value="secondary">副坐标轴</option>
+                                  </select>
+                                </div>
+                              </div>
                             </div>
                             
                             {/* 组合图表多Y轴配置 */}
@@ -2454,6 +2634,48 @@ const SimpleApp: React.FC = () => {
                                         <option key={option} value={option}>{option}</option>
                                       ))}
                                   </select>
+                                  
+                                  {/* 第二Y轴配置 */}
+                                  {currentChartConfig.dataSeries.yAxis2 && (
+                                    <div className="mt-3 grid grid-cols-2 gap-3">
+                                      <div>
+                                        <label className="block text-xs text-gray-600 mb-1">图表类型</label>
+                                        <select
+                                          value={currentChartConfig.dataSeries.yAxis2Config?.chartType || 'line'}
+                                          onChange={(e) => {
+                                            const currentConfig = currentChartConfig.dataSeries.yAxis2Config || { chartType: 'line' as const, axisPosition: 'secondary' as const }
+                                            updateCurrentChartConfig('dataSeries', 'yAxis2Config', {
+                                              ...currentConfig,
+                                              chartType: e.target.value as 'bar' | 'line' | 'area'
+                                            })
+                                          }}
+                                          className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                                        >
+                                          <option value="bar">柱状</option>
+                                          <option value="line">折线</option>
+                                          <option value="area">面积</option>
+                                        </select>
+                                      </div>
+                                      
+                                      <div>
+                                        <label className="block text-xs text-gray-600 mb-1">坐标轴</label>
+                                        <select
+                                          value={currentChartConfig.dataSeries.yAxis2Config?.axisPosition || 'secondary'}
+                                          onChange={(e) => {
+                                            const currentConfig = currentChartConfig.dataSeries.yAxis2Config || { chartType: 'line' as const, axisPosition: 'secondary' as const }
+                                            updateCurrentChartConfig('dataSeries', 'yAxis2Config', {
+                                              ...currentConfig,
+                                              axisPosition: e.target.value as 'primary' | 'secondary'
+                                            })
+                                          }}
+                                          className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                                        >
+                                          <option value="primary">主坐标轴</option>
+                                          <option value="secondary">副坐标轴</option>
+                                        </select>
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
                                 
                                 <div className="border-t pt-4">
@@ -2468,7 +2690,7 @@ const SimpleApp: React.FC = () => {
                                           dataKey: dataOptions.yAxis.find(opt => opt !== currentChartConfig.dataSeries.yAxis && opt !== currentChartConfig.dataSeries.yAxis2) || '',
                                           type: 'line' as const,
                                           color: `rgba(${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, 0.8)`,
-                                          position: 'right' as const
+                                          axisPosition: 'secondary' as const
                                         }
                                         const currentAdditional = currentChartConfig.dataSeries.additionalYAxes || []
                                         updateCurrentChartConfig('dataSeries', 'additionalYAxes', [...currentAdditional, newYAxis])
@@ -2554,20 +2776,20 @@ const SimpleApp: React.FC = () => {
                                         </div>
                                         
                                         <div>
-                                          <label className="block text-xs text-gray-600 mb-1">位置</label>
+                                          <label className="block text-xs text-gray-600 mb-1">坐标轴</label>
                                           <select
-                                            value={axis.position}
+                                            value={axis.axisPosition}
                                             onChange={(e) => {
                                               const currentAdditional = currentChartConfig.dataSeries.additionalYAxes || []
                                               const updated = currentAdditional.map(a => 
-                                                a.id === axis.id ? {...a, position: e.target.value as 'left' | 'right'} : a
+                                                a.id === axis.id ? {...a, axisPosition: e.target.value as 'primary' | 'secondary'} : a
                                               )
                                               updateCurrentChartConfig('dataSeries', 'additionalYAxes', updated)
                                             }}
                                             className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
                                           >
-                                            <option value="left">左侧</option>
-                                            <option value="right">右侧</option>
+                                            <option value="primary">主坐标轴</option>
+                                            <option value="secondary">副坐标轴</option>
                                           </select>
                                         </div>
                                       </div>
