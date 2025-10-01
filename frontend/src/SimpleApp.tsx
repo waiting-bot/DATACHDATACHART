@@ -24,16 +24,214 @@ interface ChartInstance {
       showGridLines: boolean
       showDataLabels: boolean
       dataLabelFormat: '整数' | '1位小数' | '2位小数' | '百分比'
+      dataLabelPosition?: 'center' | 'start' | 'end'
+      dataLabelColor?: string
+      // 新增：防重叠设置
+      dataLabelAntiOverlap: {
+        enabled: boolean
+        maxLabels: number
+        fontSize: 'auto' | number
+        displayInterval: number
+        showExtremesOnly: boolean
+        autoHideOverlap: boolean
+      }
+    }
+    // 新增：每个数据系列的独立数据标签配置
+    dataLabels?: {
+      primary: {
+        enabled: boolean
+        format: '整数' | '1位小数' | '2位小数' | '百分比'
+        position: 'center' | 'start' | 'end'
+        color: string
+        // 新增：防重叠设置
+        antiOverlap: {
+          enabled: boolean
+          maxLabels: number
+          fontSize: 'auto' | number
+          displayInterval: number
+          showExtremesOnly: boolean
+          autoHideOverlap: boolean
+        }
+      }
+      secondary: {
+        enabled: boolean
+        format: '整数' | '1位小数' | '2位小数' | '百分比'
+        position: 'center' | 'start' | 'end'
+        color: string
+        // 新增：防重叠设置
+        antiOverlap: {
+          enabled: boolean
+          maxLabels: number
+          fontSize: 'auto' | number
+          displayInterval: number
+          showExtremesOnly: boolean
+          autoHideOverlap: boolean
+        }
+      }
     }
     layout: {
       showAxisLabels: boolean
       xAxisLabel: string
       yAxisLabel: string
+      yAxis2Label: string
     }
   }
 }
 
+
+// 智能标签算法辅助函数
+const DataLabelUtils = {
+  // 计算最佳字体大小
+  calculateFontSize: (dataLength: number, userSetting: 'auto' | number): number => {
+    if (userSetting !== 'auto') return userSetting;
+
+    // 根据数据点数量自动调整字体大小
+    if (dataLength > 30) return 8;
+    if (dataLength > 20) return 9;
+    if (dataLength > 15) return 10;
+    if (dataLength > 10) return 11;
+    if (dataLength > 5) return 12;
+    return 14;
+  },
+
+  // 检查是否应该显示此标签（间隔显示）
+  shouldDisplayLabel: (
+    index: number,
+    displayInterval: number,
+    maxLabels: number,
+    totalLength: number
+  ): boolean => {
+    // 间隔显示逻辑
+    if (displayInterval > 1 && index % displayInterval !== 0) {
+      return false;
+    }
+
+    // 最大标签数量限制
+    if (maxLabels > 0) {
+      const step = Math.ceil(totalLength / maxLabels);
+      return index % step === 0;
+    }
+
+    return true;
+  },
+
+  // 检查是否为极值
+  isExtremeValue: (
+    value: number,
+    dataIndex: number,
+    dataset: number[],
+    showExtremesOnly: boolean
+  ): boolean => {
+    if (!showExtremesOnly) return true;
+
+    const maxValue = Math.max(...dataset);
+    const minValue = Math.min(...dataset);
+
+    return value === maxValue || value === minValue;
+  },
+
+  // 检测标签重叠（简化版本）
+  wouldOverlap: (
+    context: any,
+    existingLabels: Array<{x: number, y: number, width: number, height: number}>
+  ): boolean => {
+    // 这是一个简化的重叠检测算法
+    // 在实际应用中，Chart.js的datalabels插件已经内置了碰撞检测
+    const position = context.chart.getDatasetMeta(context.datasetIndex).data[context.dataIndex];
+    const labelWidth = 40; // 估算标签宽度
+    const labelHeight = 16; // 估算标签高度
+
+    const newLabel = {
+      x: position.x - labelWidth / 2,
+      y: position.y - labelHeight / 2,
+      width: labelWidth,
+      height: labelHeight
+    };
+
+    return existingLabels.some(label =>
+      newLabel.x < label.x + label.width &&
+      newLabel.x + newLabel.width > label.x &&
+      newLabel.y < label.y + label.height &&
+      newLabel.y + newLabel.height > label.y
+    );
+  },
+
+  // 智能标签显示决策器
+  shouldShowLabel: (
+    context: any,
+    antiOverlapConfig: any,
+    dataset: number[]
+  ): boolean => {
+    // 如果没有防重叠配置，总是显示标签
+    if (!antiOverlapConfig) return true;
+
+    const { enabled, displayInterval, maxLabels, showExtremesOnly, autoHideOverlap } = antiOverlapConfig;
+
+    // 调试输出
+    console.log('shouldShowLabel调用:', {
+      enabled,
+      showExtremesOnly,
+      displayInterval,
+      maxLabels,
+      autoHideOverlap,
+      dataIndex: context.dataIndex,
+      value: dataset[context.dataIndex],
+      datasetLength: dataset.length
+    });
+
+    if (!enabled) return true; // 如果防重叠未启用，总是显示
+
+    const dataIndex = context.dataIndex;
+    const value = dataset[dataIndex];
+
+    // 检查间隔显示
+    if (!DataLabelUtils.shouldDisplayLabel(dataIndex, displayInterval, maxLabels, dataset.length)) {
+      return false;
+    }
+
+    // 检查极值
+    if (!DataLabelUtils.isExtremeValue(value, dataIndex, dataset, showExtremesOnly)) {
+      return false;
+    }
+
+    return true;
+  },
+
+  // 格式化数值
+  formatValue: (value: number, format: string): string => {
+    if (format === '百分比') {
+      return `${value}%`;
+    } else if (format === '1位小数') {
+      return value.toFixed(1);
+    } else if (format === '2位小数') {
+      return value.toFixed(2);
+    } else {
+      return value.toString();
+    }
+  }
+};
+
 const SimpleApp: React.FC = () => {
+  // 图表颜色生成函数
+  const getChartColor = (index: number, alpha: number = 1): string => {
+    const colors = [
+      [59, 130, 246],   // 蓝色
+      [16, 185, 129],   // 绿色
+      [251, 146, 60],   // 橙色
+      [147, 51, 234],   // 紫色
+      [236, 72, 153],   // 粉色
+      [250, 204, 21],   // 黄色
+      [99, 102, 241],   // 靛蓝色
+      [239, 68, 68],    // 红色
+      [245, 158, 11],   // 琥珀色
+      [14, 165, 233]    // 天蓝色
+    ];
+
+    const colorIndex = index % colors.length;
+    const [r, g, b] = colors[colorIndex];
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  };
+
   const [currentStep, setCurrentStep] = useState('access_code')
   const [accessCode, setAccessCode] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -64,7 +262,8 @@ const SimpleApp: React.FC = () => {
         layout: {
           showAxisLabels: true,
           xAxisLabel: '',
-          yAxisLabel: ''
+          yAxisLabel: '',
+          yAxis2Label: ''
         }
       }
     }
@@ -137,12 +336,21 @@ const SimpleApp: React.FC = () => {
           showDataLabels: false,
           dataLabelFormat: '1位小数',
           dataLabelPosition: 'center',
-          dataLabelColor: '#ffffff'
+          dataLabelColor: '#ffffff',
+          dataLabelAntiOverlap: {
+            enabled: false, // 确保新图表默认不启用防重叠功能
+            maxLabels: 20,
+            fontSize: 'auto',
+            displayInterval: 1,
+            showExtremesOnly: false,
+            autoHideOverlap: true
+          }
         },
         layout: {
           showAxisLabels: true,
           xAxisLabel: '',
-          yAxisLabel: ''
+          yAxisLabel: '',
+          yAxis2Label: ''
         }
       }
     }
@@ -477,9 +685,10 @@ const SimpleApp: React.FC = () => {
           dataLabelColor: '#ffffff'
         },
         layout: {
-          showAxisLabels: currentChartConfig.layout.showAxisLabels,
+          showAxisLabels: currentChartConfig.layout?.showAxisLabels ?? true,
           xAxisLabel: '',
-          yAxisLabel: ''
+          yAxisLabel: '',
+          yAxis2Label: ''
         }
       }
       setCurrentChartConfig(defaultConfig)
@@ -528,6 +737,7 @@ const SimpleApp: React.FC = () => {
       showAxisLabels: boolean
       xAxisLabel: string
       yAxisLabel: string
+      yAxis2Label: string
     }
   }>>({})
   
@@ -560,12 +770,55 @@ const SimpleApp: React.FC = () => {
               legendPosition: 'top',
               showGridLines: true,
               showDataLabels: false,
-              dataLabelFormat: '1位小数'
+              dataLabelFormat: '1位小数',
+              // 新增：防重叠设置默认值
+              dataLabelAntiOverlap: {
+                enabled: false, // 默认关闭防重叠功能，确保预览不显示数据标签
+                maxLabels: 20,
+                fontSize: 'auto',
+                displayInterval: 1,
+                showExtremesOnly: false,
+                autoHideOverlap: true
+              }
             },
+            // 新增：每个数据系列的独立数据标签配置
+            dataLabels: {
+              primary: {
+                enabled: false,
+                format: '1位小数',
+                position: 'center',
+                color: '#ffffff',
+                // 新增：防重叠设置默认值
+                antiOverlap: {
+                  enabled: false, // 默认关闭防重叠功能，确保预览不显示数据标签
+                  maxLabels: 20,
+                  fontSize: 'auto',
+                  displayInterval: 1,
+                  showExtremesOnly: false,
+                  autoHideOverlap: true
+                }
+              },
+              secondary: {
+                enabled: false,
+                format: '1位小数',
+                position: 'center',
+                color: '#ffffff',
+                // 新增：防重叠设置默认值
+                antiOverlap: {
+                  enabled: false, // 默认关闭防重叠功能，确保预览不显示数据标签
+                  maxLabels: 20,
+                  fontSize: 'auto',
+                  displayInterval: 1,
+                  showExtremesOnly: false,
+                  autoHideOverlap: true
+                }
+              }
+            }, // 结束dataLabels配置
             layout: {
               showAxisLabels: currentChartConfig?.layout?.showAxisLabels ?? true,
               xAxisLabel: '',
-              yAxisLabel: ''
+              yAxisLabel: '',
+              yAxis2Label: ''
             }
           };
         } else {
@@ -583,14 +836,24 @@ const SimpleApp: React.FC = () => {
               legendPosition: 'top',
               showGridLines: true,
               showDataLabels: false,
-              dataLabelFormat: '1位小数'
+              dataLabelFormat: '1位小数',
+              // 添加防重叠设置默认值
+              dataLabelAntiOverlap: {
+                enabled: false, // 确保预览不显示数据标签
+                maxLabels: 20,
+                fontSize: 'auto',
+                displayInterval: 1,
+                showExtremesOnly: false,
+                autoHideOverlap: true
+              }
             },
             layout: {
               showAxisLabels: currentChartConfig?.layout?.showAxisLabels ?? true,
               xAxisLabel: '',
-              yAxisLabel: ''
+              yAxisLabel: '',
+              yAxis2Label: ''
             }
-          }
+          };
         }
       }
     })
@@ -618,7 +881,8 @@ const SimpleApp: React.FC = () => {
     layout: {
       showAxisLabels: chartConfig.showAxisLabels,
       xAxisLabel: '',
-      yAxisLabel: ''
+      yAxisLabel: '',
+      yAxis2Label: ''
     }
   })
   
@@ -777,7 +1041,9 @@ const SimpleApp: React.FC = () => {
 
   // 图表实时预览 - 支持多图表同时显示
   useEffect(() => {
+    console.log('🎯🎯🎯 Chart Preview useEffect 触发 - currentStep:', currentStep, 'selectedChartTypes:', selectedChartTypes)
     if (currentStep !== 'chart_generation' || selectedChartTypes.length === 0) {
+      console.log('🎯🎯🎯 Chart Preview useEffect 提前退出 - 不满足条件')
       return
     }
 
@@ -895,26 +1161,35 @@ const SimpleApp: React.FC = () => {
               }
             } else if (chartType === 'combination') {
               // 处理组合图表 - 默认显示柱状图+折线图
+              console.log('🎯🎯🎯 开始渲染组合图表 - 这个消息应该总能看到')
               const chartConfig_instance = chartConfigs['combination'] || currentChartConfig
               const additionalYAxes = chartConfig_instance.dataSeries.additionalYAxes || []
+              console.log('🎯 组合图表调试 - additionalYAxes:', additionalYAxes, '长度:', additionalYAxes.length)
 
-              // 确保第二Y轴数据存在，如果不存在则自动选择
+              // 检查用户是否设置了副Y轴（自动设置或手动设置都算）
               let secondYAxisData = chartConfig_instance.dataSeries.yAxis2
               const mainYAxisData = chartConfig_instance.dataSeries.yAxis || dataSeries.yAxis
               console.log('组合图表调试 - 初始第二Y轴:', secondYAxisData, '主Y轴:', mainYAxisData)
+              console.log('组合图表调试 - 当前dataSeries配置:', chartConfig_instance.dataSeries)
 
-              if (!secondYAxisData || secondYAxisData === mainYAxisData) {
-                const suggestedSecondaryYAxis = getBestSecondaryYAxis(mainYAxisData)
-                console.log('组合图表调试 - 建议的第二Y轴:', suggestedSecondaryYAxis, '可用选项:', dataOptions.yAxis)
+              // 检查副Y轴的配置
+              const secondYAxisConfig = chartConfig_instance.dataSeries.yAxis2Config || { chartType: 'line' as const, axisPosition: 'secondary' as const }
+              console.log('组合图表调试 - 副Y轴配置:', secondYAxisConfig)
 
-                if (suggestedSecondaryYAxis) {
-                  secondYAxisData = suggestedSecondaryYAxis
-                  // 立即更新配置
-                  updateCurrentChartConfig('dataSeries', 'yAxis2', secondYAxisData)
-                  console.log('组合图表调试 - 已设置第二Y轴:', secondYAxisData)
-                } else {
-                  console.warn('组合图表调试 - 无法找到合适的第二Y轴数据')
-                }
+              // 判断第二Y轴数据是否有效：
+              // 1. yAxis2不能为空或空字符串
+              // 2. yAxis2必须在可用数据选项中
+              const isSecondYAxisDataValid = secondYAxisData &&
+                                           secondYAxisData.trim() !== '' &&
+                                           dataOptions.yAxis.includes(secondYAxisData)
+              console.log('组合图表调试 - 第二Y轴数据是否有效:', isSecondYAxisDataValid, '原因: yAxis2存在:', !!secondYAxisData, '非空:', secondYAxisData?.trim() !== '', '在选项中:', dataOptions.yAxis.includes(secondYAxisData), '坐标轴位置:', secondYAxisConfig.axisPosition)
+
+              // 如果第二Y轴数据无效，则清空
+              if (!isSecondYAxisDataValid) {
+                secondYAxisData = null
+                console.log('组合图表调试 - 第二Y轴数据无效，清空显示')
+              } else {
+                console.log('组合图表调试 - 第二Y轴数据有效，坐标轴位置:', secondYAxisConfig.axisPosition === 'primary' ? '主坐标轴' : '副坐标轴')
               }
               
               // 数据范围检测和自动调整函数
@@ -939,10 +1214,18 @@ const SimpleApp: React.FC = () => {
                 const secondYAxisData = chartConfig_instance.dataSeries.yAxis2
                 const secondYAxisConfig = chartConfig_instance.dataSeries.yAxis2Config || { chartType: 'line' as const, axisPosition: 'secondary' as const }
                 const yAxisRanges: Record<string, { min: number; max: number }> = {}
-                
+
+                // 重新检查第二Y轴数据是否有效
+                const isSecondYAxisDataValid = secondYAxisData && secondYAxisData.trim() !== '' && dataOptions.yAxis.includes(secondYAxisData)
+
+                // 判断是否需要显示副坐标轴（右侧Y轴）
+                // 只有当有数据配置为副坐标轴时才显示
+                const shouldDisplaySecondaryAxis = (secondYAxisData && secondYAxisConfig.axisPosition === 'secondary' && isSecondYAxisDataValid) ||
+                                                  additionalYAxes.some(axis => axis.dataKey && axis.axisPosition === 'secondary')
+
                 // 计算主坐标轴数据范围
                 const primaryAxisDataKeys = [mainYAxisData]
-                if (secondYAxisData && secondYAxisConfig.axisPosition === 'primary') {
+                if (secondYAxisData && secondYAxisConfig.axisPosition === 'primary' && isSecondYAxisDataValid) {
                   primaryAxisDataKeys.push(secondYAxisData)
                 }
                 additionalYAxes.forEach(axis => {
@@ -950,10 +1233,10 @@ const SimpleApp: React.FC = () => {
                     primaryAxisDataKeys.push(axis.dataKey)
                   }
                 })
-                
+
                 // 计算所有主坐标轴数据的综合范围
                 if (primaryAxisDataKeys.length > 0) {
-                  const allPrimaryData = primaryAxisDataKeys.flatMap(key => 
+                  const allPrimaryData = primaryAxisDataKeys.flatMap(key =>
                     previewData[key as keyof typeof previewData] || []
                   )
                   const numericPrimaryData = allPrimaryData.map(val => typeof val === 'number' ? val : parseFloat(val)).filter(val => !isNaN(val))
@@ -962,16 +1245,16 @@ const SimpleApp: React.FC = () => {
                     const max = Math.max(...numericPrimaryData)
                     const range = max - min
                     const padding = range * 0.1
-                    yAxisRanges.primary = { 
-                      min: Math.max(0, min - padding), 
-                      max: max + padding 
+                    yAxisRanges.primary = {
+                      min: Math.max(0, min - padding),
+                      max: max + padding
                     }
                   }
                 }
-                
+
                 // 计算副坐标轴数据范围
                 const secondaryAxisDataKeys = []
-                if (secondYAxisData && secondYAxisConfig.axisPosition === 'secondary') {
+                if (secondYAxisData && secondYAxisConfig.axisPosition === 'secondary' && isSecondYAxisDataValid) {
                   secondaryAxisDataKeys.push(secondYAxisData)
                 }
                 additionalYAxes.forEach(axis => {
@@ -1002,6 +1285,15 @@ const SimpleApp: React.FC = () => {
               
               const yAxisRanges = autoAdjustYAxes()
               let datasets = []
+
+              // 重新判断是否需要显示副坐标轴（用于图表选项配置）
+              const isSecondYAxisDataValidExternal = secondYAxisData && secondYAxisData.trim() !== '' && dataOptions.yAxis.includes(secondYAxisData)
+              const secondaryAdditionalAxes = additionalYAxes.filter(axis => axis.dataKey && axis.axisPosition === 'secondary')
+              const shouldDisplaySecondaryAxis = (secondYAxisData && secondYAxisConfig.axisPosition === 'secondary' && isSecondYAxisDataValidExternal) ||
+                                                secondaryAdditionalAxes.length > 0
+              console.log('🎯 组合图表调试 - 是否显示副坐标轴:', shouldDisplaySecondaryAxis)
+              console.log('  - 第二Y轴数据有效:', isSecondYAxisDataValidExternal, '位置:', secondYAxisConfig.axisPosition)
+              console.log('  - 高级副坐标轴数量:', secondaryAdditionalAxes.length, '详情:', secondaryAdditionalAxes.map(a => ({dataKey: a.dataKey, chartType: a.chartType || a.type})))
               
               try {
                 // 获取样式和布局配置 - 直接使用组合图配置，添加安全检查
@@ -1026,7 +1318,7 @@ const SimpleApp: React.FC = () => {
                   showAxisLabels: chartLayout.showAxisLabels ?? true,
                   xAxisLabel: chartLayout.xAxisLabel || '',
                   yAxisLabel: chartLayout.yAxisLabel || '',
-                  yAxis2Label: chartLayout.yAxis2Label || (secondYAxisData || '第二Y轴'),
+                  yAxis2Label: chartLayout.yAxis2Label || '',
                   ...chartLayout
                 }
 
@@ -1053,18 +1345,98 @@ const SimpleApp: React.FC = () => {
                   borderWidth: mainYAxisConfig.chartType === 'line' ? 2 : 1,
                   type: mainYAxisConfig.chartType === 'area' ? 'line' : mainYAxisConfig.chartType,
                   fill: mainYAxisConfig.chartType === 'area' ? 'origin' : false,
-                  yAxisID: mainYAxisConfig.axisPosition === 'primary' ? 'y' : 'y1'
+                  yAxisID: mainYAxisConfig.axisPosition === 'primary' ? 'y' : 'y1',
+                  datalabels: {
+                    display: function(context) {
+                      const antiOverlapConfig = currentChartConfig.dataLabels?.primary?.antiOverlap;
+                      const dataset = context.dataset.data as number[];
+
+                      // 首先检查是否启用了数据标签
+                      const isLabelsEnabled = currentChartConfig.dataLabels?.primary?.enabled ?? false;
+                      if (!isLabelsEnabled) {
+                        return false; // 如果没有启用数据标签，直接返回false
+                      }
+
+                      // 如果启用了自动隐藏重叠标签，让Chart.js处理
+                      if (antiOverlapConfig?.autoHideOverlap) {
+                        return true; // 让Chart.js的displayAuto处理显示逻辑
+                      }
+
+                      // 否则使用我们的智能显示逻辑
+                      return DataLabelUtils.shouldShowLabel(context, antiOverlapConfig, dataset);
+                    },
+                    color: currentChartConfig.dataLabels?.primary?.color || '#ffffff',
+                    // 智能位置映射：根据图表类型和数据类型设置合适的anchor和align
+                    anchor: function(context) {
+                      const position = currentChartConfig.dataLabels?.primary?.position || 'center';
+                      const chartType = context.dataset.type || 'bar';
+
+                      // 根据图表类型和位置设置合适的anchor
+                      if (chartType === 'bar') {
+                        // 柱状图：center在柱子中心，start在柱子顶部，end在柱子底部
+                        if (position === 'start') return 'end';
+                        if (position === 'end') return 'start';
+                        return 'center';
+                      } else if (chartType === 'line') {
+                        // 折线图：所有位置都在数据点上，但align不同
+                        return 'center';
+                      } else if (chartType === 'area') {
+                        // 面积图：类似折线图
+                        return 'center';
+                      }
+                      return 'center';
+                    },
+                    align: function(context) {
+                      const position = currentChartConfig.dataLabels?.primary?.position || 'center';
+                      const chartType = context.dataset.type || 'bar';
+
+                      // 根据图表类型和位置设置合适的对齐方式
+                      if (chartType === 'bar') {
+                        if (position === 'start') return 'start';
+                        if (position === 'end') return 'end';
+                        return 'center';
+                      } else if (chartType === 'line' || chartType === 'area') {
+                        if (position === 'start') return 'top';
+                        if (position === 'end') return 'bottom';
+                        return 'center';
+                      }
+                      return 'center';
+                    },
+                    font: function(context) {
+                      const antiOverlapConfig = currentChartConfig.dataLabels?.primary?.antiOverlap;
+                      const dataset = context.dataset.data as number[];
+                      const fontSize = DataLabelUtils.calculateFontSize(dataset.length, antiOverlapConfig?.fontSize || 'auto');
+                      return {
+                        weight: 'bold',
+                        size: fontSize
+                      };
+                    },
+                    formatter: function(value, context) {
+                      const format = currentChartConfig.dataLabels?.primary?.format || '1位小数';
+                      const antiOverlapConfig = currentChartConfig.dataLabels?.primary?.antiOverlap;
+                      const dataset = context.dataset.data as number[];
+
+                      // 应用智能显示逻辑
+                      if (!DataLabelUtils.shouldShowLabel(context, antiOverlapConfig, dataset)) {
+                        return '';
+                      }
+
+                      if (format === '百分比') {
+                        return `${value}%`;
+                      } else if (format === '1位小数') {
+                        return value.toFixed(1);
+                      } else if (format === '2位小数') {
+                        return value.toFixed(2);
+                      } else {
+                        return value.toString();
+                      }
+                    }
+                  }
                 })
-                
-                // 第二数据系列
-                const secondYAxisConfig = chartConfig_instance.dataSeries.yAxis2Config || { chartType: 'line' as const, axisPosition: 'secondary' as const }
+                console.log('🎯 组合图表调试 - 主Y轴数据集创建完成，当前数据集数量:', datasets.length)
 
-                console.log('组合图表调试 - 最终第二Y轴数据:', secondYAxisData, '主Y轴数据:', mainYAxisData)
-                console.log('组合图表调试 - 第二Y轴实际数据:', previewData[secondYAxisData as keyof typeof previewData])
-                console.log('组合图表调试 - 主Y轴实际数据:', previewData[mainYAxisData as keyof typeof previewData])
-
-                  if (secondYAxisData && secondYAxisData !== mainYAxisData) {
-                  // 计算第二Y轴的背景颜色
+                // 处理第二Y轴数据（如果存在且配置为主坐标轴）
+                if (secondYAxisData && secondYAxisConfig.axisPosition === 'primary') {
                   let secondBackgroundColor = colors.secondary?.background || 'rgba(16, 185, 129, 0.8)';
                   if (secondYAxisConfig.chartType === 'area') {
                     secondBackgroundColor = 'rgba(16, 185, 129, 0.3)';
@@ -1072,7 +1444,7 @@ const SimpleApp: React.FC = () => {
                   if (secondYAxisConfig.chartType === 'line') {
                     secondBackgroundColor = 'transparent';
                   }
-                  
+
                   datasets.push({
                     label: secondYAxisData,
                     data: previewData[secondYAxisData as keyof typeof previewData] || [],
@@ -1081,36 +1453,319 @@ const SimpleApp: React.FC = () => {
                     borderWidth: secondYAxisConfig.chartType === 'line' ? 2 : 1,
                     type: secondYAxisConfig.chartType === 'area' ? 'line' : secondYAxisConfig.chartType,
                     fill: secondYAxisConfig.chartType === 'area' ? 'origin' : false,
-                    yAxisID: secondYAxisConfig.axisPosition === 'primary' ? 'y' : 'y1'
+                    yAxisID: 'y',
+                    datalabels: {
+                      display: function(context) {
+                        const antiOverlapConfig = currentChartConfig.dataLabels?.secondary?.antiOverlap;
+                        const dataset = context.dataset.data as number[];
+                        const isLabelsEnabled = currentChartConfig.dataLabels?.secondary?.enabled ?? false;
+                        if (!isLabelsEnabled) return false;
+                        if (antiOverlapConfig?.autoHideOverlap) return true;
+                        return DataLabelUtils.shouldShowLabel(context, antiOverlapConfig, dataset);
+                      },
+                      color: currentChartConfig.dataLabels?.secondary?.color || '#ffffff',
+                      anchor: function(context) {
+                        const position = currentChartConfig.dataLabels?.secondary?.position || 'center';
+                        const chartType = context.dataset.type || 'line';
+                        if (chartType === 'bar') {
+                          if (position === 'start') return 'end';
+                          if (position === 'end') return 'start';
+                          return 'center';
+                        } else if (chartType === 'line' || chartType === 'area') {
+                          return 'center';
+                        }
+                        return 'center';
+                      },
+                      align: function(context) {
+                        const position = currentChartConfig.dataLabels?.secondary?.position || 'center';
+                        const chartType = context.dataset.type || 'line';
+                        if (chartType === 'bar') {
+                          if (position === 'start') return 'start';
+                          if (position === 'end') return 'end';
+                          return 'center';
+                        } else if (chartType === 'line' || chartType === 'area') {
+                          if (position === 'start') return 'top';
+                          if (position === 'end') return 'bottom';
+                          return 'center';
+                        }
+                        return 'center';
+                      },
+                      font: function(context) {
+                        const antiOverlapConfig = currentChartConfig.dataLabels?.secondary?.antiOverlap;
+                        const dataset = context.dataset.data as number[];
+                        const fontSize = DataLabelUtils.calculateFontSize(dataset.length, antiOverlapConfig?.fontSize || 'auto');
+                        return {
+                          weight: 'bold',
+                          size: fontSize
+                        };
+                      },
+                      formatter: function(value, context) {
+                        const format = currentChartConfig.dataLabels?.secondary?.format || '1位小数';
+                        const antiOverlapConfig = currentChartConfig.dataLabels?.secondary?.antiOverlap;
+                        const dataset = context.dataset.data as number[];
+                        if (!DataLabelUtils.shouldShowLabel(context, antiOverlapConfig, dataset)) return '';
+                        if (format === '百分比') return `${value}%`;
+                        if (format === '1位小数') return value.toFixed(1);
+                        if (format === '2位小数') return value.toFixed(2);
+                        return value.toString();
+                      }
+                    }
                   })
                 }
-                
-                // 添加额外的Y轴数据系列
-                additionalYAxes.forEach(axis => {
-                  if (axis.dataKey && axis.dataKey !== mainYAxisData && axis.dataKey !== secondYAxisData) {
-                    // 计算额外Y轴的背景颜色
-                    let additionalBackgroundColor = axis.color;
-                    if (axis.type === 'area') {
-                      additionalBackgroundColor = 'rgba(99, 102, 241, 0.3)';
+
+                // 处理第二Y轴数据（如果存在且配置为副坐标轴）- 修复缺失的副坐标轴逻辑
+                if (secondYAxisData && secondYAxisConfig.axisPosition === 'secondary') {
+                  console.log('🎯 组合图表调试 - 处理第二Y轴副坐标轴数据:', secondYAxisData, '图表类型:', secondYAxisConfig.chartType)
+
+                  let secondBackgroundColor = colors.secondary?.background || 'rgba(16, 185, 129, 0.8)';
+                  if (secondYAxisConfig.chartType === 'area') {
+                    secondBackgroundColor = 'rgba(16, 185, 129, 0.3)';
+                  }
+                  if (secondYAxisConfig.chartType === 'line') {
+                    secondBackgroundColor = 'transparent';
+                  }
+
+                  datasets.push({
+                    label: secondYAxisData,
+                    data: previewData[secondYAxisData as keyof typeof previewData] || [],
+                    backgroundColor: secondBackgroundColor,
+                    borderColor: colors.secondary?.border || 'rgba(16, 185, 129, 1)',
+                    borderWidth: secondYAxisConfig.chartType === 'line' ? 2 : 1,
+                    type: secondYAxisConfig.chartType === 'area' ? 'line' : secondYAxisConfig.chartType,
+                    fill: secondYAxisConfig.chartType === 'area' ? 'origin' : false,
+                    yAxisID: 'y1', // 使用副坐标轴ID
+                    datalabels: {
+                      display: function(context) {
+                        const antiOverlapConfig = currentChartConfig.dataLabels?.secondary?.antiOverlap;
+                        const dataset = context.dataset.data as number[];
+                        const isLabelsEnabled = currentChartConfig.dataLabels?.secondary?.enabled ?? false;
+                        if (!isLabelsEnabled) return false;
+                        if (antiOverlapConfig?.autoHideOverlap) return true;
+                        return DataLabelUtils.shouldShowLabel(context, antiOverlapConfig, dataset);
+                      },
+                      color: currentChartConfig.dataLabels?.secondary?.color || '#ffffff',
+                      anchor: function(context) {
+                        const position = currentChartConfig.dataLabels?.secondary?.position || 'center';
+                        const chartType = context.dataset.type || 'line';
+                        if (chartType === 'bar') {
+                          if (position === 'start') return 'end';
+                          if (position === 'end') return 'start';
+                          return 'center';
+                        } else if (chartType === 'line' || chartType === 'area') {
+                          return 'center';
+                        }
+                        return 'center';
+                      },
+                      align: function(context) {
+                        const position = currentChartConfig.dataLabels?.secondary?.position || 'center';
+                        const chartType = context.dataset.type || 'line';
+                        if (chartType === 'bar') {
+                          if (position === 'start') return 'start';
+                          if (position === 'end') return 'end';
+                          return 'center';
+                        } else if (chartType === 'line' || chartType === 'area') {
+                          if (position === 'start') return 'top';
+                          if (position === 'end') return 'bottom';
+                          return 'center';
+                        }
+                        return 'center';
+                      },
+                      font: function(context) {
+                        const antiOverlapConfig = currentChartConfig.dataLabels?.secondary?.antiOverlap;
+                        const dataset = context.dataset.data as number[];
+                        const fontSize = DataLabelUtils.calculateFontSize(dataset.length, antiOverlapConfig?.fontSize || 'auto');
+                        return {
+                          weight: 'bold',
+                          size: fontSize
+                        };
+                      },
+                      formatter: function(value, context) {
+                        const format = currentChartConfig.dataLabels?.secondary?.format || '1位小数';
+                        const antiOverlapConfig = currentChartConfig.dataLabels?.secondary?.antiOverlap;
+                        const dataset = context.dataset.data as number[];
+                        if (!DataLabelUtils.shouldShowLabel(context, antiOverlapConfig, dataset)) return '';
+                        if (format === '百分比') return `${value}%`;
+                        if (format === '1位小数') return value.toFixed(1);
+                        if (format === '2位小数') return value.toFixed(2);
+                        return value.toString();
+                      }
                     }
-                    if (axis.type === 'line') {
-                      additionalBackgroundColor = 'transparent';
+                  })
+
+                  console.log('🎯 组合图表调试 - 第二Y轴副坐标轴数据集已添加')
+                }
+
+                // 处理额外Y轴数据（配置为主坐标轴的）
+                console.log('🎯 组合图表调试 - 开始处理主坐标轴高级Y轴，总数:', additionalYAxes.length)
+                additionalYAxes.forEach((axis, index) => {
+                  if (axis.dataKey && axis.axisPosition === 'primary') {
+                    console.log('🎯 组合图表调试 - 处理主坐标轴高级Y轴:', {dataKey: axis.dataKey, chartType: axis.chartType || axis.type, index})
+                    const axisIndex = index + 2 // 从2开始，因为0和1已经被主Y轴和第二Y轴占用
+                    const axisColors = getChartColor(axisIndex, 1)
+                    let axisBackgroundColor = `rgba${axisColors.match(/\d+/g)?.join(',')}, 0.8)` || `rgba(255, 159, 64, 0.8)`
+                    const chartType = axis.chartType || axis.type // 兼容两种字段名
+                    if (chartType === 'area') {
+                      axisBackgroundColor = `rgba${axisColors.match(/\d+/g)?.join(',')}, 0.3)` || `rgba(255, 159, 64, 0.3)`
                     }
-                    
+                    if (chartType === 'line') {
+                      axisBackgroundColor = 'transparent'
+                    }
+
                     datasets.push({
                       label: axis.dataKey,
                       data: previewData[axis.dataKey as keyof typeof previewData] || [],
-                      backgroundColor: additionalBackgroundColor,
-                      borderColor: axis.color,
-                      borderWidth: axis.type === 'line' ? 2 : 1,
-                      type: axis.type === 'area' ? 'line' : axis.type,
-                      fill: axis.type === 'area' ? 'origin' : false,
-                      yAxisID: axis.axisPosition === 'primary' ? 'y' : 'y1'
+                      backgroundColor: axisBackgroundColor,
+                      borderColor: axisColors,
+                      borderWidth: chartType === 'line' ? 2 : 1,
+                      type: chartType === 'area' ? 'line' : chartType,
+                      fill: chartType === 'area' ? 'origin' : false,
+                      yAxisID: 'y',
+                      datalabels: {
+                        display: function(context) {
+                          const antiOverlapConfig = currentChartConfig.dataLabels?.primary?.antiOverlap;
+                          const dataset = context.dataset.data as number[];
+                          const isLabelsEnabled = currentChartConfig.dataLabels?.primary?.enabled ?? false;
+                          if (!isLabelsEnabled) return false;
+                          if (antiOverlapConfig?.autoHideOverlap) return true;
+                          return DataLabelUtils.shouldShowLabel(context, antiOverlapConfig, dataset);
+                        },
+                        color: currentChartConfig.dataLabels?.primary?.color || '#ffffff',
+                        anchor: function(context) {
+                          const position = currentChartConfig.dataLabels?.primary?.position || 'center';
+                          const chartType = context.dataset.type || 'bar';
+                          if (chartType === 'bar') {
+                            if (position === 'start') return 'end';
+                            if (position === 'end') return 'start';
+                            return 'center';
+                          } else if (chartType === 'line' || chartType === 'area') {
+                            return 'center';
+                          }
+                          return 'center';
+                        },
+                        align: function(context) {
+                          const position = currentChartConfig.dataLabels?.primary?.position || 'center';
+                          const chartType = context.dataset.type || 'bar';
+                          if (chartType === 'bar') {
+                            if (position === 'start') return 'start';
+                            if (position === 'end') return 'end';
+                            return 'center';
+                          } else if (chartType === 'line' || chartType === 'area') {
+                            if (position === 'start') return 'top';
+                            if (position === 'end') return 'bottom';
+                            return 'center';
+                          }
+                          return 'center';
+                        },
+                        font: function(context) {
+                          const antiOverlapConfig = currentChartConfig.dataLabels?.primary?.antiOverlap;
+                          const dataset = context.dataset.data as number[];
+                          const fontSize = DataLabelUtils.calculateFontSize(dataset.length, antiOverlapConfig?.fontSize || 'auto');
+                          return {
+                            weight: 'bold',
+                            size: fontSize
+                          };
+                        },
+                        formatter: function(value, context) {
+                          const format = currentChartConfig.dataLabels?.primary?.format || '1位小数';
+                          const antiOverlapConfig = currentChartConfig.dataLabels?.primary?.antiOverlap;
+                          const dataset = context.dataset.data as number[];
+                          if (!DataLabelUtils.shouldShowLabel(context, antiOverlapConfig, dataset)) return '';
+                          if (format === '百分比') return `${value}%`;
+                          if (format === '1位小数') return value.toFixed(1);
+                          if (format === '2位小数') return value.toFixed(2);
+                          return value.toString();
+                        }
+                      }
                     })
                   }
                 })
 
-                console.log('组合图表调试 - 数据集数量:', datasets.length, '数据集:', datasets)
+                // 处理额外Y轴数据（配置为副坐标轴的）
+                console.log('🎯 组合图表调试 - 开始处理副坐标轴高级Y轴，总数:', additionalYAxes.length)
+                additionalYAxes.forEach((axis, index) => {
+                  if (axis.dataKey && axis.axisPosition === 'secondary') {
+                    console.log('🎯 组合图表调试 - 处理副坐标轴高级Y轴:', {dataKey: axis.dataKey, chartType: axis.chartType || axis.type, index})
+                    const axisIndex = index + 2 // 从2开始
+                    const axisColors = getChartColor(axisIndex, 1)
+                    let axisBackgroundColor = `rgba${axisColors.match(/\d+/g)?.join(',')}, 0.8)` || `rgba(255, 99, 132, 0.8)`
+                    const chartType = axis.chartType || axis.type // 兼容两种字段名
+                    if (chartType === 'area') {
+                      axisBackgroundColor = `rgba${axisColors.match(/\d+/g)?.join(',')}, 0.3)` || `rgba(255, 99, 132, 0.3)`
+                    }
+                    if (chartType === 'line') {
+                      axisBackgroundColor = 'transparent'
+                    }
+
+                    datasets.push({
+                      label: axis.dataKey,
+                      data: previewData[axis.dataKey as keyof typeof previewData] || [],
+                      backgroundColor: axisBackgroundColor,
+                      borderColor: axisColors,
+                      borderWidth: chartType === 'line' ? 2 : 1,
+                      type: chartType === 'area' ? 'line' : chartType,
+                      fill: chartType === 'area' ? 'origin' : false,
+                      yAxisID: 'y1',
+                      datalabels: {
+                        display: function(context) {
+                          const antiOverlapConfig = currentChartConfig.dataLabels?.secondary?.antiOverlap;
+                          const dataset = context.dataset.data as number[];
+                          const isLabelsEnabled = currentChartConfig.dataLabels?.secondary?.enabled ?? false;
+                          if (!isLabelsEnabled) return false;
+                          if (antiOverlapConfig?.autoHideOverlap) return true;
+                          return DataLabelUtils.shouldShowLabel(context, antiOverlapConfig, dataset);
+                        },
+                        color: currentChartConfig.dataLabels?.secondary?.color || '#ffffff',
+                        anchor: function(context) {
+                          const position = currentChartConfig.dataLabels?.secondary?.position || 'center';
+                          const chartType = context.dataset.type || 'line';
+                          if (chartType === 'bar') {
+                            if (position === 'start') return 'end';
+                            if (position === 'end') return 'start';
+                            return 'center';
+                          } else if (chartType === 'line' || chartType === 'area') {
+                            return 'center';
+                          }
+                          return 'center';
+                        },
+                        align: function(context) {
+                          const position = currentChartConfig.dataLabels?.secondary?.position || 'center';
+                          const chartType = context.dataset.type || 'line';
+                          if (chartType === 'bar') {
+                            if (position === 'start') return 'start';
+                            if (position === 'end') return 'end';
+                            return 'center';
+                          } else if (chartType === 'line' || chartType === 'area') {
+                            if (position === 'start') return 'top';
+                            if (position === 'end') return 'bottom';
+                            return 'center';
+                          }
+                          return 'center';
+                        },
+                        font: function(context) {
+                          const antiOverlapConfig = currentChartConfig.dataLabels?.secondary?.antiOverlap;
+                          const dataset = context.dataset.data as number[];
+                          const fontSize = DataLabelUtils.calculateFontSize(dataset.length, antiOverlapConfig?.fontSize || 'auto');
+                          return {
+                            weight: 'bold',
+                            size: fontSize
+                          };
+                        },
+                        formatter: function(value, context) {
+                          const format = currentChartConfig.dataLabels?.secondary?.format || '1位小数';
+                          const antiOverlapConfig = currentChartConfig.dataLabels?.secondary?.antiOverlap;
+                          const dataset = context.dataset.data as number[];
+                          if (!DataLabelUtils.shouldShowLabel(context, antiOverlapConfig, dataset)) return '';
+                          if (format === '百分比') return `${value}%`;
+                          if (format === '1位小数') return value.toFixed(1);
+                          if (format === '2位小数') return value.toFixed(2);
+                          return value.toString();
+                        }
+                      }
+                    })
+                  }
+                })
+
+                console.log('组合图表调试 - 所有数据集创建完成，数量:', datasets.length)
 
                 // 如果没有数据集，创建一个默认的数据集以确保图表能显示
                 if (datasets.length === 0) {
@@ -1158,24 +1813,8 @@ const SimpleApp: React.FC = () => {
                         }
                       },
                       datalabels: {
-                        display: safeStyling.showDataLabels,
-                        color: safeStyling.dataLabelColor || '#fff',
-                        anchor: safeStyling.dataLabelPosition || 'center',
-                        font: {
-                          weight: 'bold',
-                          size: 10
-                        },
-                        formatter: (value: number) => {
-                          if (safeStyling.dataLabelFormat === '百分比') {
-                            return `${value}%`;
-                          } else if (safeStyling.dataLabelFormat === '1位小数') {
-                            return value.toFixed(1);
-                          } else if (safeStyling.dataLabelFormat === '2位小数') {
-                            return value.toFixed(2);
-                          } else {
-                            return value.toString();
-                          }
-                        }
+                        // 对于组合图表，使用per-dataset配置，所以全局设置为false
+                        display: false
                       }
                     },
                     scales: {
@@ -1202,7 +1841,7 @@ const SimpleApp: React.FC = () => {
                       },
                       y1: {
                         type: 'linear',
-                        display: secondYAxisData && secondYAxisData !== mainYAxisData ? safeLayout.showAxisLabels : false,
+                        display: shouldDisplaySecondaryAxis ? safeLayout.showAxisLabels : false,
                         position: 'right',
                         beginAtZero: true,
                         min: yAxisRanges.secondary?.min,
@@ -1240,8 +1879,7 @@ const SimpleApp: React.FC = () => {
                     }
                   }
                 }
-
-                  } catch (error) {
+              } catch (error) {
                 console.error('组合图表生成错误:', error)
                 // 如果出错，使用默认的柱状图配置
                 const fallbackXAxis = chartConfig_instance.dataSeries.xAxis || dataSeries.xAxis
@@ -1264,7 +1902,9 @@ const SimpleApp: React.FC = () => {
               // 散点图特殊处理：需要x,y坐标点数据
               const xData = previewData[dataSeries.xAxis as keyof typeof previewData] || []
               const yData = previewData[dataSeries.yAxis as keyof typeof previewData] || []
-              
+
+              console.log('散点图调试 - X轴数据:', xData, 'Y轴数据:', yData)
+
               // 将x,y数据转换为散点图需要的点数据格式
               const scatterData = xData.map((xValue: any, index: number) => {
                 const xNum = typeof xValue === 'number' ? xValue : parseFloat(xValue)
@@ -1274,6 +1914,8 @@ const SimpleApp: React.FC = () => {
                   y: isNaN(yNum) ? 0 : yNum
                 }
               })
+
+              console.log('散点图调试 - 转换后的数据:', scatterData)
               
               chartConfig_data = {
                 type: 'scatter',
@@ -1333,6 +1975,15 @@ const SimpleApp: React.FC = () => {
               dataLabelFormat: chartStyling.dataLabelFormat ?? '1位小数',
               dataLabelPosition: chartStyling.dataLabelPosition ?? 'center',
               dataLabelColor: chartStyling.dataLabelColor ?? '#ffffff',
+              // 添加防重叠配置默认值
+              antiOverlap: chartStyling.dataLabelAntiOverlap ?? {
+                enabled: true,
+                maxLabels: 20,
+                fontSize: 'auto',
+                displayInterval: 1,
+                showExtremesOnly: false,
+                autoHideOverlap: true
+              },
               title: chartStyling.title || `${getChartTypeName(chartType)}`,
               ...chartStyling
             }
@@ -1369,24 +2020,8 @@ const SimpleApp: React.FC = () => {
                   }
                 },
                 datalabels: {
-                  display: safeStyling.showDataLabels,
-                  color: safeStyling.dataLabelColor || '#fff',
-                  anchor: safeStyling.dataLabelPosition || 'center',
-                  font: {
-                    weight: 'bold',
-                    size: 10
-                  },
-                  formatter: (value: number) => {
-                    if (safeStyling.dataLabelFormat === '百分比') {
-                      return `${value}%`;
-                    } else if (safeStyling.dataLabelFormat === '1位小数') {
-                      return value.toFixed(1);
-                    } else if (safeStyling.dataLabelFormat === '2位小数') {
-                      return value.toFixed(2);
-                    } else {
-                      return value.toString();
-                    }
-                  }
+                  // 对于组合图表，使用per-dataset配置，所以全局设置为false
+                  display: false
                 }
               };
             } else {
@@ -1415,22 +2050,65 @@ const SimpleApp: React.FC = () => {
                     }
                   },
                   datalabels: {
-                    display: safeStyling.showDataLabels,
+                    display: function(context) {
+                      const antiOverlapConfig = safeStyling.antiOverlap;
+                      const dataset = context.dataset.data as number[];
+
+                      // 调试输出
+                      console.log('普通图表防重叠配置:', {
+                        antiOverlapConfig,
+                        showDataLabels: safeStyling.showDataLabels,
+                        dataIndex: context.dataIndex,
+                        chartType: chartType
+                      });
+
+                      // 如果启用了防重叠功能，使用智能显示逻辑（即使普通标签未启用）
+                      if (antiOverlapConfig?.enabled) {
+                        // 如果启用了自动隐藏重叠标签，让Chart.js处理
+                        if (antiOverlapConfig?.autoHideOverlap) {
+                          return true; // 让Chart.js处理显示逻辑
+                        }
+                        // 否则使用我们的智能显示逻辑
+                        return DataLabelUtils.shouldShowLabel(context, antiOverlapConfig, dataset);
+                      }
+
+                      // 如果只是启用了普通数据标签显示，全部显示
+                      return safeStyling.showDataLabels;
+                    },
                     color: safeStyling.dataLabelColor || '#fff',
                     anchor: safeStyling.dataLabelPosition || 'center',
-                    font: {
-                      weight: 'bold',
-                      size: 10
+                    font: function(context) {
+                      const antiOverlapConfig = safeStyling.antiOverlap;
+                      const dataset = context.dataset.data as number[];
+                      const fontSize = DataLabelUtils.calculateFontSize(dataset.length, antiOverlapConfig?.fontSize || 'auto');
+                      return {
+                        weight: 'bold',
+                        size: fontSize
+                      };
                     },
-                    formatter: (value: number) => {
+                    formatter: function(value, context) {
+                      const antiOverlapConfig = safeStyling.antiOverlap;
+                      const dataset = context.dataset.data as number[];
+
+                      // 应用智能显示逻辑
+                      if (!DataLabelUtils.shouldShowLabel(context, antiOverlapConfig, dataset)) {
+                        return '';
+                      }
+
+                      // 确保值是数字类型
+                      const numValue = typeof value === 'number' ? value : parseFloat(value);
+                      if (isNaN(numValue)) {
+                        return value.toString(); // 如果不是数字，直接返回字符串
+                      }
+
                       if (safeStyling.dataLabelFormat === '百分比') {
-                        return `${value}%`;
+                        return `${numValue}%`;
                       } else if (safeStyling.dataLabelFormat === '1位小数') {
-                        return value.toFixed(1);
+                        return numValue.toFixed(1);
                       } else if (safeStyling.dataLabelFormat === '2位小数') {
-                        return value.toFixed(2);
+                        return numValue.toFixed(2);
                       } else {
-                        return value.toString();
+                        return numValue.toString();
                       }
                     }
                   }
@@ -1876,18 +2554,20 @@ const SimpleApp: React.FC = () => {
         }
       }
 
-      // 特殊处理：组合图表自动选择第二Y轴数据
+      // 特殊处理：组合图表智能设置第二Y轴数据
       if (type === 'combination' && !prev.includes(type)) {
-        // 如果是新增组合图表，尝试自动选择第二Y轴
+        console.log('🎯🎯🎯 用户选择了组合图，开始智能设置副Y轴数据 - 这条消息在选择组合图时应该看到')
+
+        // 如果是新增组合图表，尝试自动选择第二Y轴作为默认值
         const currentPrimaryYAxis = currentChartConfig.dataSeries.yAxis
         const currentSecondaryYAxis = currentChartConfig.dataSeries.yAxis2
 
-        // 只有在用户尚未手动设置第二Y轴时才自动选择
+        // 只有在用户尚未手动设置第二Y轴时才自动选择（提供默认组合图体验）
         if (!currentSecondaryYAxis) {
           const suggestedSecondaryYAxis = getBestSecondaryYAxis(currentPrimaryYAxis)
 
           if (suggestedSecondaryYAxis) {
-            // 自动设置第二Y轴数据
+            // 自动设置第二Y轴数据作为默认值
             updateCurrentChartConfig('dataSeries', 'yAxis2', suggestedSecondaryYAxis)
 
             // 同时更新组合图表的专用配置
@@ -1901,7 +2581,79 @@ const SimpleApp: React.FC = () => {
                 }
               }
             }))
+
+            console.log('🎯 组合图已自动设置默认副Y轴:', suggestedSecondaryYAxis)
           }
+        }
+      }
+
+      // 特殊处理：散点图自动设置XY轴数据
+      if (type === 'scatter' && !prev.includes(type)) {
+        console.log('🎯 散点图被选择，开始自动设置XY轴数据')
+
+        // 获取可用的数值列
+        const numericColumns = dataOptions.yAxis || []
+        console.log('📊 可用的数值列:', numericColumns)
+
+        // 尝试找到最适合的XY轴数据
+        let xAxisColumn = null
+        let yAxisColumn = null
+
+        if (numericColumns.length >= 2) {
+          // 优先选择看起来像连续数据的列作为X轴
+          // 检查第一列是否包含数字或可以被转换为数字
+          const firstColumn = numericColumns[0]
+          const firstColumnData = excelParsedData?.data?.map(row => row[firstColumn]) || []
+          const isNumericColumn = firstColumnData.some(val => {
+            const num = parseFloat(val)
+            return !isNaN(num) && isFinite(num)
+          })
+
+          if (isNumericColumn) {
+            // 如果第一列是数值型，用它作为X轴
+            xAxisColumn = firstColumn
+            yAxisColumn = numericColumns[1]
+          } else {
+            // 如果第一列不是数值型，尝试找其他数值列作为X轴
+            for (let i = 1; i < numericColumns.length; i++) {
+              const columnData = excelParsedData?.data?.map(row => row[numericColumns[i]]) || []
+              const hasNumericData = columnData.some(val => {
+                const num = parseFloat(val)
+                return !isNaN(num) && isFinite(num)
+              })
+
+              if (hasNumericData) {
+                xAxisColumn = numericColumns[i]
+                yAxisColumn = numericColumns[i === 1 ? 0 : 1] // 选择另一个列作为Y轴
+                break
+              }
+            }
+          }
+
+          if (xAxisColumn && yAxisColumn) {
+            console.log(`✅ 自动设置散点图数据: X轴=${xAxisColumn}, Y轴=${yAxisColumn}`)
+
+            // 更新当前图表配置
+            updateCurrentChartConfig('dataSeries', 'xAxis', xAxisColumn)
+            updateCurrentChartConfig('dataSeries', 'yAxis', yAxisColumn)
+
+            // 同时更新散点图的专用配置
+            setChartConfigs(prev => ({
+              ...prev,
+              'scatter': {
+                ...prev['scatter'],
+                dataSeries: {
+                  ...prev['scatter']?.dataSeries,
+                  xAxis: xAxisColumn,
+                  yAxis: yAxisColumn
+                }
+              }
+            }))
+          } else {
+            console.log('⚠️ 无法找到合适的数值列作为散点图X轴数据')
+          }
+        } else {
+          console.log('⚠️ 数值列不足，无法自动设置散点图数据')
         }
       }
 
@@ -2432,7 +3184,7 @@ const SimpleApp: React.FC = () => {
                         </div>
                         
                         {/* 图表卡片网格 */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                           {selectedChartTypes.map((chartType, index) => (
                             <div key={chartType} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
                               <div className="space-y-4">
@@ -2860,6 +3612,7 @@ const SimpleApp: React.FC = () => {
                                           id: `yaxis_${Date.now()}`,
                                           dataKey: dataOptions.yAxis.find(opt => opt !== currentChartConfig.dataSeries.yAxis && opt !== currentChartConfig.dataSeries.yAxis2) || '',
                                           type: 'line' as const,
+                                          chartType: 'line' as const, // 同时设置两个字段以保持兼容性
                                           color: `rgba(${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, 0.8)`,
                                           axisPosition: 'secondary' as const
                                         }
@@ -2917,8 +3670,8 @@ const SimpleApp: React.FC = () => {
                                             value={axis.type}
                                             onChange={(e) => {
                                               const currentAdditional = currentChartConfig.dataSeries.additionalYAxes || []
-                                              const updated = currentAdditional.map(a => 
-                                                a.id === axis.id ? {...a, type: e.target.value as 'bar' | 'line' | 'area'} : a
+                                              const updated = currentAdditional.map(a =>
+                                                a.id === axis.id ? {...a, type: e.target.value as 'bar' | 'line' | 'area', chartType: e.target.value as 'bar' | 'line' | 'area'} : a
                                               )
                                               updateCurrentChartConfig('dataSeries', 'additionalYAxes', updated)
                                             }}
@@ -2967,18 +3720,19 @@ const SimpleApp: React.FC = () => {
                                     </div>
                                   ))}
                                 </div>
-                              </div>
+
+                                </div>
                             )}
                           </div>
                         )}
-                        
+
                         {drawerConfigSection === 'layout' && (
                           <div className="space-y-4">
                             <div>
                               <label className="flex items-center text-sm text-gray-700">
                                 <input
                                   type="checkbox"
-                                  checked={currentChartConfig.layout.showAxisLabels}
+                                  checked={currentChartConfig.layout?.showAxisLabels ?? true}
                                   onChange={(e) => {
                                     updateCurrentChartConfig('layout', 'showAxisLabels', e.target.checked)
                                   }}
@@ -2988,28 +3742,45 @@ const SimpleApp: React.FC = () => {
                               </label>
                             </div>
                             
-                            {currentChartConfig.layout.showAxisLabels && (
-                              <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                  <label className="block text-sm text-gray-700 mb-2">X轴标签</label>
-                                  <input
-                                    type="text"
-                                    value={currentChartConfig.layout.xAxisLabel}
-                                    onChange={(e) => updateCurrentChartConfig('layout', 'xAxisLabel', e.target.value)}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                    placeholder="X轴名称"
-                                  />
+                            {(currentChartConfig.layout?.showAxisLabels ?? true) && (
+                              <div className="space-y-4">
+                                <div className="grid grid-cols-2 gap-4">
+                                  <div>
+                                    <label className="block text-sm text-gray-700 mb-2">X轴标签</label>
+                                    <input
+                                      type="text"
+                                      value={currentChartConfig.layout?.xAxisLabel || ''}
+                                      onChange={(e) => updateCurrentChartConfig('layout', 'xAxisLabel', e.target.value)}
+                                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                      placeholder="X轴名称"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-sm text-gray-700 mb-2">主Y轴标签</label>
+                                    <input
+                                      type="text"
+                                      value={currentChartConfig.layout?.yAxisLabel || ''}
+                                      onChange={(e) => updateCurrentChartConfig('layout', 'yAxisLabel', e.target.value)}
+                                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                      placeholder="主Y轴名称"
+                                    />
+                                  </div>
                                 </div>
-                                <div>
-                                  <label className="block text-sm text-gray-700 mb-2">Y轴标签</label>
-                                  <input
-                                    type="text"
-                                    value={currentChartConfig.layout.yAxisLabel}
-                                    onChange={(e) => updateCurrentChartConfig('layout', 'yAxisLabel', e.target.value)}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                    placeholder="Y轴名称"
-                                  />
-                                </div>
+
+                                {/* 组合图特有的副Y轴标签设置 */}
+                                {currentChartConfig.dataSeries?.yAxis2 && (
+                                  <div>
+                                    <label className="block text-sm text-gray-700 mb-2">副Y轴标签</label>
+                                    <input
+                                      type="text"
+                                      value={currentChartConfig.layout?.yAxis2Label || ''}
+                                      onChange={(e) => updateCurrentChartConfig('layout', 'yAxis2Label', e.target.value)}
+                                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                      placeholder="副Y轴名称"
+                                    />
+                                    <p className="text-xs text-gray-500 mt-1">为组合图的右侧Y轴设置标签</p>
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
@@ -3031,49 +3802,423 @@ const SimpleApp: React.FC = () => {
 
                             {currentChartConfig.styling?.showDataLabels && (
                               <div className="space-y-4">
-                                <div>
-                                  <label className="block text-sm text-gray-700 mb-2">数据格式</label>
-                                  <select
-                                    value={currentChartConfig.styling?.dataLabelFormat || '整数'}
-                                    onChange={(e) => updateCurrentChartConfig('styling', 'dataLabelFormat', e.target.value)}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                  >
-                                    <option value="整数">整数</option>
-                                    <option value="1位小数">1位小数</option>
-                                    <option value="2位小数">2位小数</option>
-                                    <option value="百分比">百分比</option>
-                                  </select>
-                                </div>
-                                <div>
-                                  <label className="block text-sm text-gray-700 mb-2">标签位置</label>
-                                  <select
-                                    value={currentChartConfig.styling?.dataLabelPosition || 'center'}
-                                    onChange={(e) => updateCurrentChartConfig('styling', 'dataLabelPosition', e.target.value)}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                  >
-                                    <option value="center">中心</option>
-                                    <option value="start">开始</option>
-                                    <option value="end">结束</option>
-                                  </select>
-                                </div>
-                                <div>
-                                  <label className="block text-sm text-gray-700 mb-2">标签颜色</label>
-                                  <div className="flex items-center space-x-2">
-                                    <input
-                                      type="color"
-                                      value={currentChartConfig.styling?.dataLabelColor || '#000000'}
-                                      onChange={(e) => updateCurrentChartConfig('styling', 'dataLabelColor', e.target.value)}
-                                      className="w-12 h-10 border border-gray-300 rounded-md cursor-pointer"
-                                    />
-                                    <input
-                                      type="text"
-                                      value={currentChartConfig.styling?.dataLabelColor || '#000000'}
-                                      onChange={(e) => updateCurrentChartConfig('styling', 'dataLabelColor', e.target.value)}
-                                      className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                      placeholder="#ffffff"
-                                    />
+                                {/* 普通图表数据标签配置 */}
+                                {selectedChartForConfig !== 'combination' && (
+                                  <div className="space-y-4">
+                                    <div>
+                                      <label className="block text-sm text-gray-700 mb-2">数据格式</label>
+                                      <select
+                                        value={currentChartConfig.styling?.dataLabelFormat || '整数'}
+                                        onChange={(e) => updateCurrentChartConfig('styling', 'dataLabelFormat', e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                      >
+                                        <option value="整数">整数</option>
+                                        <option value="1位小数">1位小数</option>
+                                        <option value="2位小数">2位小数</option>
+                                        <option value="百分比">百分比</option>
+                                      </select>
+                                    </div>
+                                    <div>
+                                      <label className="block text-sm text-gray-700 mb-2">标签位置</label>
+                                      <select
+                                        value={currentChartConfig.styling?.dataLabelPosition || 'center'}
+                                        onChange={(e) => updateCurrentChartConfig('styling', 'dataLabelPosition', e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                      >
+                                        <option value="center">中心</option>
+                                        <option value="start">开始</option>
+                                        <option value="end">结束</option>
+                                      </select>
+                                    </div>
+                                    <div>
+                                      <label className="block text-sm text-gray-700 mb-2">标签颜色</label>
+                                      <div className="flex items-center space-x-2">
+                                        <input
+                                          type="color"
+                                          value={currentChartConfig.styling?.dataLabelColor || '#000000'}
+                                          onChange={(e) => updateCurrentChartConfig('styling', 'dataLabelColor', e.target.value)}
+                                          className="w-12 h-10 border border-gray-300 rounded-md cursor-pointer"
+                                        />
+                                        <input
+                                          type="text"
+                                          value={currentChartConfig.styling?.dataLabelColor || '#000000'}
+                                          onChange={(e) => updateCurrentChartConfig('styling', 'dataLabelColor', e.target.value)}
+                                          className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                          placeholder="#ffffff"
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* 防重叠设置 - 适用于所有图表类型 */}
+                                <div className="space-y-4 border-t pt-4">
+                                  <div className="text-sm font-medium text-gray-700 mb-3">防重叠设置</div>
+
+                                  <div className="space-y-3">
+                                    <div className="flex items-center justify-between">
+                                      <label className="text-sm text-gray-700">启用防重叠</label>
+                                      <label className="flex items-center">
+                                        <input
+                                          type="checkbox"
+                                          checked={currentChartConfig.styling?.dataLabelAntiOverlap?.enabled ?? false}
+                                          onChange={(e) => updateCurrentChartConfig('styling', 'dataLabelAntiOverlap', {
+                                            ...(currentChartConfig.styling?.dataLabelAntiOverlap || {
+                                              enabled: false,
+                                              maxLabels: 20,
+                                              fontSize: 'auto',
+                                              displayInterval: 1,
+                                              showExtremesOnly: false,
+                                              autoHideOverlap: true
+                                            }),
+                                            enabled: e.target.checked
+                                          })}
+                                          className="mr-2 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                        />
+                                        <span className="text-sm text-gray-600">启用</span>
+                                      </label>
+                                    </div>
+
+                                    {currentChartConfig.styling?.dataLabelAntiOverlap?.enabled && (
+                                      <>
+                                        <div className="grid grid-cols-2 gap-4">
+                                          <div>
+                                            <label className="block text-sm text-gray-700 mb-2">最大标签数量</label>
+                                            <input
+                                              type="number"
+                                              min="1"
+                                              max="100"
+                                              value={currentChartConfig.styling?.dataLabelAntiOverlap?.maxLabels ?? 20}
+                                              onChange={(e) => updateCurrentChartConfig('styling', 'dataLabelAntiOverlap', {
+                                                ...(currentChartConfig.styling?.dataLabelAntiOverlap || {}),
+                                                maxLabels: parseInt(e.target.value) || 20
+                                              })}
+                                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                            />
+                                          </div>
+
+                                          <div>
+                                            <label className="block text-sm text-gray-700 mb-2">显示间隔</label>
+                                            <input
+                                              type="number"
+                                              min="1"
+                                              max="10"
+                                              value={currentChartConfig.styling?.dataLabelAntiOverlap?.displayInterval ?? 1}
+                                              onChange={(e) => updateCurrentChartConfig('styling', 'dataLabelAntiOverlap', {
+                                                ...(currentChartConfig.styling?.dataLabelAntiOverlap || {}),
+                                                displayInterval: parseInt(e.target.value) || 1
+                                              })}
+                                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                            />
+                                          </div>
+                                        </div>
+
+                                        <div className="grid grid-cols-2 gap-4">
+                                          <div>
+                                            <label className="block text-sm text-gray-700 mb-2">字体大小</label>
+                                            <select
+                                              value={currentChartConfig.styling?.dataLabelAntiOverlap?.fontSize === 'auto' ? 'auto' : currentChartConfig.styling?.dataLabelAntiOverlap?.fontSize}
+                                              onChange={(e) => updateCurrentChartConfig('styling', 'dataLabelAntiOverlap', {
+                                                ...(currentChartConfig.styling?.dataLabelAntiOverlap || {}),
+                                                fontSize: e.target.value === 'auto' ? 'auto' : parseInt(e.target.value)
+                                              })}
+                                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                            >
+                                              <option value="auto">自动</option>
+                                              <option value="8">8px</option>
+                                              <option value="10">10px</option>
+                                              <option value="12">12px</option>
+                                              <option value="14">14px</option>
+                                              <option value="16">16px</option>
+                                            </select>
+                                          </div>
+
+                                          <div className="flex items-center">
+                                            <label className="flex items-center text-sm text-gray-700">
+                                              <input
+                                                type="checkbox"
+                                                checked={currentChartConfig.styling?.dataLabelAntiOverlap?.autoHideOverlap ?? true}
+                                                onChange={(e) => updateCurrentChartConfig('styling', 'dataLabelAntiOverlap', {
+                                                  ...(currentChartConfig.styling?.dataLabelAntiOverlap || {}),
+                                                  autoHideOverlap: e.target.checked
+                                                })}
+                                                className="mr-2 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                              />
+                                              自动隐藏重叠标签
+                                            </label>
+                                          </div>
+                                        </div>
+
+                                        <div className="flex items-center">
+                                          <label className="flex items-center text-sm text-gray-700">
+                                            <input
+                                              type="checkbox"
+                                              checked={currentChartConfig.styling?.dataLabelAntiOverlap?.showExtremesOnly ?? false}
+                                              onChange={(e) => updateCurrentChartConfig('styling', 'dataLabelAntiOverlap', {
+                                                ...(currentChartConfig.styling?.dataLabelAntiOverlap || {}),
+                                                showExtremesOnly: e.target.checked
+                                              })}
+                                              className="mr-2 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                            />
+                                            只显示极值（最大值和最小值）
+                                          </label>
+                                        </div>
+                                      </>
+                                    )}
                                   </div>
                                 </div>
+
+                                {/* 组合图表数据标签配置 */}
+                                {selectedChartForConfig === 'combination' && (
+                                  <div className="space-y-4 border-t pt-4">
+                                    <div className="text-sm font-medium text-gray-700 mb-3">组合图表数据标签设置</div>
+
+                                    {/* 主Y轴数据标签配置 */}
+                                    <div className="p-3 border rounded bg-gray-50">
+                                      <div className="flex items-center justify-between mb-3">
+                                        <span className="text-sm font-medium text-gray-700">主Y轴数据标签</span>
+                                        <label className="flex items-center text-sm text-gray-600">
+                                          <input
+                                            type="checkbox"
+                                            checked={currentChartConfig.dataLabels?.primary?.enabled ?? false}
+                                            onChange={(e) => updateCurrentChartConfig('dataLabels', 'primary', {
+                                              ...(currentChartConfig.dataLabels?.primary || {
+                                                enabled: false,
+                                                format: '1位小数',
+                                                position: 'center',
+                                                color: '#ffffff'
+                                              }),
+                                              enabled: e.target.checked
+                                            })}
+                                            className="mr-2 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                          />
+                                          启用
+                                        </label>
+                                      </div>
+
+                                      {currentChartConfig.dataLabels?.primary?.enabled && (
+                                        <div className="grid grid-cols-1 gap-3">
+                                          <div>
+                                            <label className="block text-xs text-gray-600 mb-1">数据格式</label>
+                                            <select
+                                              value={currentChartConfig.dataLabels?.primary?.format || '1位小数'}
+                                              onChange={(e) => updateCurrentChartConfig('dataLabels', 'primary', {
+                                                ...(currentChartConfig.dataLabels?.primary || {}),
+                                                format: e.target.value
+                                              })}
+                                              className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                                            >
+                                              <option value="整数">整数</option>
+                                              <option value="1位小数">1位小数</option>
+                                              <option value="2位小数">2位小数</option>
+                                              <option value="百分比">百分比</option>
+                                            </select>
+                                          </div>
+                                          <div>
+                                            <label className="block text-xs text-gray-600 mb-1">标签位置</label>
+                                            <select
+                                              value={currentChartConfig.dataLabels?.primary?.position || 'center'}
+                                              onChange={(e) => updateCurrentChartConfig('dataLabels', 'primary', {
+                                                ...(currentChartConfig.dataLabels?.primary || {}),
+                                                position: e.target.value
+                                              })}
+                                              className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                                            >
+                                              <option value="center">中心</option>
+                                              <option value="start">开始</option>
+                                              <option value="end">结束</option>
+                                            </select>
+                                          </div>
+                                          <div>
+                                            <label className="block text-xs text-gray-600 mb-1">标签颜色</label>
+                                            <div className="flex items-center space-x-2">
+                                              <input
+                                                type="color"
+                                                value={currentChartConfig.dataLabels?.primary?.color || '#ffffff'}
+                                                onChange={(e) => updateCurrentChartConfig('dataLabels', 'primary', {
+                                                  ...(currentChartConfig.dataLabels?.primary || {}),
+                                                  color: e.target.value
+                                                })}
+                                                className="w-8 h-6 border border-gray-300 rounded cursor-pointer"
+                                              />
+                                              <input
+                                                type="text"
+                                                value={currentChartConfig.dataLabels?.primary?.color || '#ffffff'}
+                                                onChange={(e) => updateCurrentChartConfig('dataLabels', 'primary', {
+                                                  ...(currentChartConfig.dataLabels?.primary || {}),
+                                                  color: e.target.value
+                                                })}
+                                                className="flex-1 px-2 py-1 border border-gray-300 rounded text-xs"
+                                                placeholder="#ffffff"
+                                              />
+                                            </div>
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* 主Y轴防重叠设置 */}
+                                      {currentChartConfig.dataLabels?.primary?.enabled && (
+                                        <div className="border-t pt-3 mt-3">
+                                          <div className="text-xs font-medium text-gray-700 mb-2">防重叠设置</div>
+                                          <div className="space-y-2">
+                                            <div className="flex items-center justify-between">
+                                              <label className="text-xs text-gray-600">启用防重叠</label>
+                                              <label className="flex items-center">
+                                                <input
+                                                  type="checkbox"
+                                                  checked={currentChartConfig.dataLabels?.primary?.antiOverlap?.enabled ?? false}
+                                                  onChange={(e) => updateCurrentChartConfig('dataLabels', 'primary', {
+                                                                                    ...(currentChartConfig.dataLabels?.primary || {}),
+                                                                                    antiOverlap: {
+                                                                                      ...(currentChartConfig.dataLabels?.primary?.antiOverlap || {
+                                                                                        enabled: false,
+                                                                                        maxLabels: 20,
+                                                                                        fontSize: 'auto',
+                                                                                        displayInterval: 1,
+                                                                                        showExtremesOnly: false,
+                                                                                        autoHideOverlap: true
+                                                                                      }),
+                                                                                      enabled: e.target.checked
+                                                                                    }
+                                                                                  })}
+                                                  className="mr-1 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                                />
+                                                <span className="text-xs text-gray-600">启用</span>
+                                              </label>
+                                            </div>
+
+                                            {currentChartConfig.dataLabels?.primary?.antiOverlap?.enabled && (
+                                              <div className="grid grid-cols-2 gap-2">
+                                                <div>
+                                                  <label className="block text-xs text-gray-600 mb-1">显示间隔</label>
+                                                  <input
+                                                    type="number"
+                                                    min="1"
+                                                    max="10"
+                                                    value={currentChartConfig.dataLabels?.primary?.antiOverlap?.displayInterval ?? 1}
+                                                    onChange={(e) => updateCurrentChartConfig('dataLabels', 'primary', {
+                                                                                      ...(currentChartConfig.dataLabels?.primary || {}),
+                                                                                      antiOverlap: {
+                                                                                        ...(currentChartConfig.dataLabels?.primary?.antiOverlap || {}),
+                                                                                        displayInterval: parseInt(e.target.value) || 1
+                                                                                      }
+                                                                                    })}
+                                                    className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                                                  />
+                                                </div>
+                                                <div>
+                                                  <label className="block text-xs text-gray-600 mb-1">字体大小</label>
+                                                  <select
+                                                    value={currentChartConfig.dataLabels?.primary?.antiOverlap?.fontSize === 'auto' ? 'auto' : currentChartConfig.dataLabels?.primary?.antiOverlap?.fontSize}
+                                                    onChange={(e) => updateCurrentChartConfig('dataLabels', 'primary', {
+                                                                                      ...(currentChartConfig.dataLabels?.primary || {}),
+                                                                                      antiOverlap: {
+                                                                                        ...(currentChartConfig.dataLabels?.primary?.antiOverlap || {}),
+                                                                                        fontSize: e.target.value === 'auto' ? 'auto' : parseInt(e.target.value)
+                                                                                      }
+                                                                                    })}
+                                                    className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                                                  >
+                                                    <option value="auto">自动</option>
+                                                    <option value="8">8px</option>
+                                                    <option value="10">10px</option>
+                                                    <option value="12">12px</option>
+                                                  </select>
+                                                </div>
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    {/* 第二Y轴数据标签配置 */}
+                                    {currentChartConfig.dataSeries.yAxis2 && (
+                                      <div className="p-3 border rounded bg-gray-50">
+                                        <div className="flex items-center justify-between mb-3">
+                                          <span className="text-sm font-medium text-gray-700">第二Y轴数据标签</span>
+                                          <label className="flex items-center text-sm text-gray-600">
+                                            <input
+                                              type="checkbox"
+                                              checked={currentChartConfig.dataLabels?.secondary?.enabled ?? false}
+                                              onChange={(e) => updateCurrentChartConfig('dataLabels', 'secondary', {
+                                                ...(currentChartConfig.dataLabels?.secondary || {
+                                                  enabled: false,
+                                                  format: '1位小数',
+                                                  position: 'center',
+                                                  color: '#ffffff'
+                                                }),
+                                                enabled: e.target.checked
+                                              })}
+                                              className="mr-2 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                            />
+                                            启用
+                                          </label>
+                                        </div>
+
+                                        {currentChartConfig.dataLabels?.secondary?.enabled && (
+                                          <div className="grid grid-cols-1 gap-3">
+                                            <div>
+                                              <label className="block text-xs text-gray-600 mb-1">数据格式</label>
+                                              <select
+                                                value={currentChartConfig.dataLabels?.secondary?.format || '1位小数'}
+                                                onChange={(e) => updateCurrentChartConfig('dataLabels', 'secondary', {
+                                                  ...(currentChartConfig.dataLabels?.secondary || {}),
+                                                  format: e.target.value
+                                                })}
+                                                className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                                              >
+                                                <option value="整数">整数</option>
+                                                <option value="1位小数">1位小数</option>
+                                                <option value="2位小数">2位小数</option>
+                                                <option value="百分比">百分比</option>
+                                              </select>
+                                            </div>
+                                            <div>
+                                              <label className="block text-xs text-gray-600 mb-1">标签位置</label>
+                                              <select
+                                                value={currentChartConfig.dataLabels?.secondary?.position || 'center'}
+                                                onChange={(e) => updateCurrentChartConfig('dataLabels', 'secondary', {
+                                                  ...(currentChartConfig.dataLabels?.secondary || {}),
+                                                  position: e.target.value
+                                                })}
+                                                className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                                              >
+                                                <option value="center">中心</option>
+                                                <option value="start">开始</option>
+                                                <option value="end">结束</option>
+                                              </select>
+                                            </div>
+                                            <div>
+                                              <label className="block text-xs text-gray-600 mb-1">标签颜色</label>
+                                              <div className="flex items-center space-x-2">
+                                                <input
+                                                  type="color"
+                                                  value={currentChartConfig.dataLabels?.secondary?.color || '#ffffff'}
+                                                  onChange={(e) => updateCurrentChartConfig('dataLabels', 'secondary', {
+                                                    ...(currentChartConfig.dataLabels?.secondary || {}),
+                                                    color: e.target.value
+                                                  })}
+                                                  className="w-8 h-6 border border-gray-300 rounded cursor-pointer"
+                                                />
+                                                <input
+                                                  type="text"
+                                                  value={currentChartConfig.dataLabels?.secondary?.color || '#ffffff'}
+                                                  onChange={(e) => updateCurrentChartConfig('dataLabels', 'secondary', {
+                                                    ...(currentChartConfig.dataLabels?.secondary || {}),
+                                                    color: e.target.value
+                                                  })}
+                                                  className="flex-1 px-2 py-1 border border-gray-300 rounded text-xs"
+                                                  placeholder="#ffffff"
+                                                />
+                                              </div>
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
@@ -3254,6 +4399,7 @@ const SimpleApp: React.FC = () => {
     }
   }
 
+  console.log('🎯🎯🎯 主渲染函数执行 - currentStep:', currentStep)
   return (
     <div className="professional-bg touch-manipulation">
       <div className="min-h-screen flex flex-col safe-area-inset">
